@@ -2,16 +2,16 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Logo } from "@/components/rehearse/primitives";
-import { Chip } from "@/components/rehearse/app-shell";
+import { Logo } from "@/components/intervue-you/primitives";
+import { Chip } from "@/components/intervue-you/app-shell";
 import { profileStore } from "@/services/interview";
 
 export const Route = createFileRoute("/onboarding")({
   head: () => ({
     meta: [
-      { title: "Set up your practice — Rehearse" },
-      { name: "description", content: "Tell Rehearse the role you're going for so your interviews match it." },
-      { property: "og:title", content: "Set up your practice — Rehearse" },
+      { title: "Set up your practice —  Intervue You" },
+      { name: "description", content: "Tell  Intervue You the role you're going for so your interviews match it." },
+      { property: "og:title", content: "Set up your practice —  Intervue You" },
       { property: "og:description", content: "Three quick questions and you're ready to practise." },
     ],
   }),

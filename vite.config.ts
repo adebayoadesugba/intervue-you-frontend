@@ -13,5 +13,11 @@ export default defineConfig({
   },
   vite: {
     plugins: [netlify()],
+    server: {
+      port: 8080,
+      headers: {
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+      },
+    },
   },
 });

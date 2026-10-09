@@ -1,17 +1,26 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Loader2, Send } from "lucide-react";
-import { AppShell } from "@/components/rehearse/app-shell";
-import { ScoreRing, SkillBar } from "@/components/rehearse/primitives";
+import { AppShell } from "@/components/intervue-you/app-shell";
+import { ScoreRing, SkillBar } from "@/components/intervue-you/primitives";
 import { SKILLS } from "@/data/marketing";
 import { interviewService, sessions, type Session } from "@/services/interview";
+import { getToken } from "@/lib/auth";
 
 export const Route = createFileRoute("/results/$id")({
+  beforeLoad: ({ location }) => {
+    // SSR Safe Check: Only evaluate auth on the client
+    if (typeof window !== "undefined" && !getToken()) {
+      if (location.pathname !== "/login") {
+        throw redirect({ to: "/login" });
+      }
+    }
+  },
   head: () => ({
     meta: [
-      { title: "Your results — Rehearse" },
+      { title: "Your results — Intervue You" },
       { name: "description", content: "Scorecard, question-by-question feedback and coaching for your mock interview." },
-      { property: "og:title", content: "Your results — Rehearse" },
+      { property: "og:title", content: "Your results — Intervue You" },
       { property: "og:description", content: "See how you did and what to improve." },
       { name: "robots", content: "noindex" },
     ],
@@ -21,20 +30,73 @@ export const Route = createFileRoute("/results/$id")({
 
 function Results() {
   const { id } = Route.useParams();
+  const nav = useNavigate();
   const [s, setS] = useState<Session | null | undefined>(undefined);
   const [chat, setChat] = useState<{ me: boolean; t: string }[]>([]);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setS(sessions.get(id)); }, [id]);
 
-  if (s === undefined) return <AppShell><div className="h-64" /></AppShell>;
-  if (!s?.scores) return <AppShell><p>No results for this session yet. <Link to="/dashboard" className="text-primary">Back to dashboard</Link></p></AppShell>;
+  useEffect(() => {
+    const fetchSession = async () => {
+      const token = getToken();
+
+      // 1. Redirect unauthenticated users immediately
+      if (!token) {
+        nav({ to: "/login" });
+        return;
+      }
+
+      // 2. First check local storage (for fresh local interviews)
+      const local = sessions.get(id);
+      if (local && local.scores) {
+        setS(local);
+        return;
+      }
+
+      // 3. Fetch from Express / MongoDB backend
+      try {
+        const res = await fetch(`http://localhost:5000/api/sessions/${id}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (!res.ok) return setS(null);
+
+        const data = await res.json();
+
+        // Normalize MongoDB keys to match frontend expectation
+        const formattedSession: Session = {
+          id: data._id,
+          role: data.role,
+          mode: data.mode,
+          minutes: data.minutes || 10,
+          createdAt: new Date(data.createdAt).getTime(),
+          turns: data.transcript || [],
+          overall: data.overallScore ?? data.overall,
+          scores: data.scores || { technical: 75, communication: 75, problemSolving: 75, teamwork: 75 },
+          feedback: typeof data.feedback === "string" ? JSON.parse(data.feedback) : data.feedback,
+        };
+
+        setS(formattedSession);
+      } catch (err) {
+        console.error("Error fetching session from Express:", err);
+        setS(null);
+      }
+    };
+
+    fetchSession();
+  }, [id, nav]);
+
+  if (s === undefined) return <AppShell><div className="h-64 flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div></AppShell>;
+  if (!s?.scores) return <AppShell><p className="p-8 text-center text-muted-foreground">No results found for this session. <Link to="/dashboard" className="text-primary hover:underline">Back to dashboard</Link></p></AppShell>;
 
   const send = async (text: string) => {
     if (!text.trim() || busy) return;
-    setChat((c) => [...c, { me: true, t: text }]); setMsg(""); setBusy(true);
+    setChat((c) => [...c, { me: true, t: text }]); 
+    setMsg(""); 
+    setBusy(true);
     const r = await interviewService.coach(text, s);
-    setChat((c) => [...c, { me: false, t: r }]); setBusy(false);
+    setChat((c) => [...c, { me: false, t: r }]); 
+    setBusy(false);
   };
 
   return (
@@ -43,12 +105,16 @@ function Results() {
         <ScoreRing value={s.overall!} size={120} label="Overall" />
         <div>
           <p className="text-sm text-muted-foreground">{s.role} · {s.mode} · {s.turns.length} answers</p>
-          <h1 className="mt-1 text-3xl font-semibold">You're <span className="font-display-serif text-primary">{s.overall! >= 75 ? "interview-ready." : s.overall! >= 60 ? "nearly there." : "building up."}</span></h1>
+          <h1 className="mt-1 text-3xl font-semibold">
+            You're <span className="font-display-serif text-primary">{s.overall! >= 75 ? "interview-ready." : s.overall! >= 60 ? "nearly there." : "building up."}</span>
+          </h1>
         </div>
       </div>
 
       <div className="mt-8 grid gap-4 lg:grid-cols-3">
-        <div className="surface-card space-y-4 rounded-3xl p-6 lg:col-span-2">{SKILLS.map((k) => <SkillBar key={k.key} skill={k.key} value={s.scores![k.key]} />)}</div>
+        <div className="surface-card space-y-4 rounded-3xl p-6 lg:col-span-2">
+          {SKILLS.map((k) => <SkillBar key={k.key} skill={k.key} value={s.scores![k.key]} />)}
+        </div>
         <div className="surface-card grid grid-cols-2 gap-4 rounded-3xl p-6 text-center">
           <div><p className="text-2xl font-semibold tabular-nums">{s.speech?.wpm || "—"}</p><p className="text-xs text-muted-foreground">words / min</p></div>
           <div><p className="text-2xl font-semibold tabular-nums">{s.speech?.fillers ?? 0}</p><p className="text-xs text-muted-foreground">filler words</p></div>
@@ -60,13 +126,29 @@ function Results() {
         {s.feedback?.map((f, i) => (
           <details key={i} className="surface-card group rounded-2xl p-5" open={i === 0}>
             <summary className="flex cursor-pointer list-none items-start justify-between gap-4">
-              <span className="font-medium">{f.q}</span><span className="shrink-0 font-semibold tabular-nums">{f.score}</span>
+              <span className="font-medium">{f.q}</span>
+              <span className="shrink-0 font-semibold tabular-nums">{f.score}</span>
             </summary>
             <div className="mt-4 space-y-4 text-sm">
               <p className="rounded-xl bg-muted p-3 text-muted-foreground">“{f.a}”</p>
               <p>{f.note}</p>
-              <div className="flex gap-2">{(["S", "T", "A", "R"] as const).map((k) => <span key={k} className={`grid h-8 w-8 place-items-center rounded-full text-xs font-semibold ${f.star[k] ? "bg-success/20 text-success" : "bg-muted text-muted-foreground"}`}>{k}</span>)}<span className="self-center text-xs text-muted-foreground">STAR check</span></div>
-              <div><p className="text-xs font-medium uppercase tracking-wider text-primary">A stronger answer</p><p className="mt-1 text-muted-foreground">{f.better}</p></div>
+              <div className="flex gap-2">
+                {(["S", "T", "A", "R"] as const).map((k) => (
+                  <span 
+                    key={k} 
+                    className={`grid h-8 w-8 place-items-center rounded-full text-xs font-semibold ${
+                      f.star?.[k] ? "bg-success/20 text-success" : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {k}
+                  </span>
+                ))}
+                <span className="self-center text-xs text-muted-foreground">STAR check</span>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-primary">A stronger answer</p>
+                <p className="mt-1 text-muted-foreground">{f.better}</p>
+              </div>
             </div>
           </details>
         ))}
@@ -82,7 +164,9 @@ function Results() {
               ))}
             </div>
           )}
-          {chat.map((m, i) => <div key={i} className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${m.me ? "ml-auto bg-primary text-primary-foreground" : "bg-muted"}`}>{m.t}</div>)}
+          {chat.map((m, i) => (
+            <div key={i} className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${m.me ? "ml-auto bg-primary text-primary-foreground" : "bg-muted"}`}>{m.t}</div>
+          ))}
           {busy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         </div>
         <form onSubmit={(e) => { e.preventDefault(); void send(msg); }} className="mt-4 flex gap-2">

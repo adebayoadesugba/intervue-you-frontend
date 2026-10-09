@@ -8,27 +8,53 @@ export type User = { id: string; name: string; email: string };
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const authService = {
-  async login(email: string, password: string): Promise<User> {
-    await wait(700);
-    if (password.length < 8) throw new Error("That email and password don't match. Try again or reset your password.");
-    const user = { id: "u_1", name: email.split("@")[0] ?? "there", email };
-    storage.set("user", user);
-    return user;
+    login: async (email: string, pw: string) => {
+    const res = await fetch("http://localhost:5000/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: pw })
+    });
+    
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Login failed");
+    }
+    
+    const data = await res.json();
+    // Save the real user data and JWT token to local storage
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("user", JSON.stringify(data.user));
+    return data.user;
   },
   async signup(name: string, email: string, _password: string): Promise<User> {
-    await wait(800);
+    await fetch("http://localhost:5000/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, email, password: _password })
+    });
     const user = { id: "u_1", name, email };
     storage.set("user", user);
     return user;
   },
-  async google(): Promise<User> {
-    // REAL API: start your Google OAuth flow here.
-    await wait(600);
-    const user = { id: "u_g", name: "Guest", email: "guest@rehearse.app" };
-    storage.set("user", user);
-    return user;
+  google: async (credentialToken: string) => {
+    const res = await fetch("http://localhost:5000/api/auth/google", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: credentialToken }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.message || "Google Authentication failed");
+    }
+
+    const data = await res.json();
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("user", JSON.stringify(data.user));
+    return data.user;
   },
   async resetPassword(_email: string) {
     await wait(700);
   },
 };
+

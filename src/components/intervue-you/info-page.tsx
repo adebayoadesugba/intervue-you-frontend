@@ -27,9 +27,9 @@ export function InfoPage({ eyebrow, title, intro, sections }: { eyebrow: string;
 
 export const meta = (title: string, description: string) => ({
   meta: [
-    { title: `${title} — Rehearse` },
+    { title: `${title} —  Intervue You` },
     { name: "description", content: description },
-    { property: "og:title", content: `${title} — Rehearse` },
+    { property: "og:title", content: `${title} —  Intervue You` },
     { property: "og:description", content: description },
   ],
 });

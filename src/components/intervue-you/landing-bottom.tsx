@@ -27,7 +27,7 @@ export function Reviews() {
       <div className="container-x">
         <div className="reveal max-w-2xl">
           <Eyebrow>Reviews</Eyebrow>
-          <h2 className="text-4xl font-semibold sm:text-5xl">What people say after using Rehearse</h2>
+          <h2 className="text-4xl font-semibold sm:text-5xl">What people say after using  Intervue You</h2>
         </div>
         <div
           className="reveal surface-card mt-12 grid overflow-hidden rounded-[2rem] md:grid-cols-[1.3fr_1fr]"

@@ -7,11 +7,11 @@ import { Logo, ThemeToggle } from "./primitives";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { label: "Features", hash: "features" },
-  { label: "How it works", hash: "how-it-works" },
-  { label: "Reviews", hash: "reviews" },
-  { label: "Pricing", hash: "pricing" },
-  { label: "FAQ", hash: "faq" },
+  { label: "Features", to: "/", hash: "features" },
+  { label: "How it works", to: "/", hash: "how-it-works" },
+  { label: "Reviews", to: "/", hash: "reviews" },
+  { label: "Pricing", to: "/price" },
+  { label: "FAQ", to: "/faq" },
 ];
 
 export function Navbar() {
@@ -34,8 +34,8 @@ export function Navbar() {
         <Logo />
         <ul className="hidden items-center gap-1 lg:flex">
           {NAV.map((n) => (
-            <li key={n.hash}>
-              <Link to="/" hash={n.hash} className="rounded-full px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
+            <li key={n.label}>
+              <Link to={n.to} {...(n.hash ? { hash: n.hash } : {})} className="rounded-full px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
                 {n.label}
               </Link>
             </li>
@@ -53,7 +53,7 @@ export function Navbar() {
       <div className={cn("fixed inset-x-0 top-16 bottom-0 z-40 bg-background/95 backdrop-blur-xl transition-[opacity,transform] duration-300 lg:hidden", open ? "opacity-100" : "pointer-events-none -translate-y-2 opacity-0")}>
         <div className="container-x flex h-full flex-col gap-1 py-6">
           {NAV.map((n) => (
-            <Link key={n.hash} to="/" hash={n.hash} onClick={() => setOpen(false)} className="rounded-2xl px-3 py-4 text-2xl font-medium tracking-tight">
+            <Link key={n.label} to={n.to} {...(n.hash ? { hash: n.hash } : {})} onClick={() => setOpen(false)} className="rounded-2xl px-3 py-4 text-2xl font-medium tracking-tight">
               {n.label}
             </Link>
           ))}
@@ -74,8 +74,8 @@ const soon = (label: string) => () => toast(`${label} is arriving in the next up
 
 type FLink = { label: string; to?: string; hash?: string };
 const COLS: { title: string; links: FLink[] }[] = [
-  { title: "Product", links: [{ label: "Features", to: "/", hash: "features" }, { label: "How it works", to: "/", hash: "how-it-works" }, { label: "Pricing", to: "/", hash: "pricing" }, { label: "Roles" }] },
-  { title: "Resources", links: [{ label: "Interview tips" }, { label: "Question bank" }, { label: "Blog" }, { label: "FAQ", to: "/", hash: "faq" }] },
+  { title: "Product", links: [{ label: "Features", to: "/", hash: "features" }, { label: "How it works", to: "/", hash: "how-it-works" }, { label: "Pricing", to: "/price" }, { label: "Roles" }] },
+  { title: "Resources", links: [{ label: "Interview tips" }, { label: "Question bank" }, { label: "Blog" }, { label: "FAQ", to: "/faq" }] },
   { title: "Company", links: [{ label: "About", to: "/about" }, { label: "Careers" }, { label: "Contact", to: "/contact" }] },
   { title: "Legal", links: [{ label: "Terms", to: "/terms" }, { label: "Privacy", to: "/privacy" }, { label: "Cookie policy", to: "/cookies" }] },
 ];
@@ -107,8 +107,8 @@ export function Footer() {
               </a>
             ))}
           </div>
-          <a href="mailto:support@rehearse.app" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-            <Mail className="h-4 w-4" /> support@rehearse.app
+          <a href="mailto:support@intervueyou.com" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+            <Mail className="h-4 w-4" /> support@intervueyou.com
           </a>
         </div>
         <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
@@ -166,7 +166,7 @@ export function HelpBubble() {
         <div role="dialog" aria-label="Help" className="glass animate-fade-up absolute bottom-16 right-0 w-[min(20rem,calc(100vw-2.5rem))] rounded-2xl p-5">
           <p className="font-medium">Hi there 👋</p>
           <p className="mt-1 text-sm text-muted-foreground">Questions about plans, privacy or getting started? We usually reply within a few hours.</p>
-          <Button asChild variant="pill" className="mt-4 w-full"><a href="mailto:support@rehearse.app">Email support</a></Button>
+          <Button asChild variant="pill" className="mt-4 w-full"><a href="mailto:support@intervueyou.app">Email support</a></Button>
         </div>
       )}
       <button onClick={() => setOpen((o) => !o)} aria-label={open ? "Close help" : "Open help chat"} aria-expanded={open} className="grid h-13 w-13 h-[52px] w-[52px] place-items-center rounded-full bg-primary text-primary-foreground shadow-glow transition-transform active:scale-95">

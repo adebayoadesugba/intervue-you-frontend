@@ -5,16 +5,24 @@ import { cn } from "@/lib/utils";
 import { useTheme, type ThemeChoice } from "@/hooks/use-theme";
 import { useInView } from "@/hooks/use-reveal";
 import { SKILLS, type SkillKey } from "@/data/marketing";
+import { getToken } from "@/lib/auth";
 
-export function Logo({ className }: { className?: string }) {
+export function Logo({ className, to }: { className?: string; to?: string }) {
+  // If 'to' is not explicitly passed, route logged-in users to /dashboard and guests to /
+  const destination = to ?? (typeof window !== "undefined" && getToken() ? "/dashboard" : "/");
+
   return (
-    <Link to="/" className={cn("flex items-center gap-2 font-semibold tracking-tight", className)} aria-label="Rehearse home">
+    <Link 
+      to={destination} 
+      className={cn("flex items-center gap-2 font-semibold tracking-tight", className)} 
+      aria-label="Intervue You home"
+    >
       <span className="relative grid h-8 w-8 place-items-center rounded-xl bg-primary text-primary-foreground shadow-glow">
         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
           <path d="M5 10v4M9 7v10M13 4v16M17 8v8M21 11v2" />
         </svg>
       </span>
-      <span className="text-[17px]">Rehearse</span>
+      <span className="text-[17px]">Intervue You</span>
     </Link>
   );
 }
@@ -26,15 +34,38 @@ export function ThemeToggle({ className }: { className?: string }) {
     { v: "light", icon: Sun, label: "Light theme" },
     { v: "system", icon: Monitor, label: "System theme" },
   ];
+
+  const handleThemeChange = (newTheme: ThemeChoice) => {
+    setTheme(newTheme);
+    const root = document.documentElement;
+
+    if (newTheme === "light") {
+      root.classList.remove("dark");
+    } else if (newTheme === "dark") {
+      root.classList.add("dark");
+    } else if (newTheme === "system") {
+      const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      if (systemDark) {
+        root.classList.add("dark");
+      } else {
+        root.classList.remove("dark");
+      }
+    }
+  };
+
   return (
-    <div role="radiogroup" aria-label="Theme" className={cn("inline-flex items-center rounded-full border border-border bg-card/60 p-0.5", className)}>
+    <div
+      role="radiogroup"
+      aria-label="Theme"
+      className={cn("inline-flex items-center rounded-full border border-border bg-card/60 p-0.5", className)}
+    >
       {opts.map(({ v, icon: Icon, label }) => (
         <button
           key={v}
           role="radio"
           aria-checked={theme === v}
           aria-label={label}
-          onClick={() => setTheme(v)}
+          onClick={() => handleThemeChange(v)}
           className={cn(
             "grid h-8 w-8 place-items-center rounded-full text-muted-foreground transition-colors",
             theme === v && "bg-accent text-foreground",
@@ -117,14 +148,18 @@ export const Waveform = memo(function Waveform({ bars = 24, active = true, class
         <span
           key={i}
           className={cn("w-[3px] rounded-full bg-primary", active && "wave-bar")}
-          style={{ height: `${30 + ((i * 37) % 70)}%`, animationDelay: `${(i % 8) * 0.09}s`, transform: active ? undefined : "scaleY(0.3)" }}
+          style={{
+            height: `${30 + ((i * 37) % 70)}%`,
+            animationDelay: `${(i % 8) * 0.09}s`,
+            transform: active ? undefined : "scaleY(0.3)",
+          }}
         />
       ))}
     </div>
   );
 });
 
-export function AppWindow({ children, className, title = "rehearse.app/interview" }: { children: React.ReactNode; className?: string; title?: string }) {
+export function AppWindow({ children, className, title = "intervue-you.app/interview" }: { children: React.ReactNode; className?: string; title?: string }) {
   return (
     <div className={cn("surface-card overflow-hidden rounded-3xl", className)}>
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">

@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { InfoPage, meta } from "@/components/rehearse/info-page";
+import { InfoPage, meta } from "@/components/intervue-you/info-page";
 
 export const Route = createFileRoute("/cookies")({
-  head: () => meta("Cookie Policy", "The small set of cookies and local storage Rehearse uses."),
+  head: () => meta("Cookie Policy", "The small set of cookies and local storage  Intervue You uses."),
   component: () => (
     <InfoPage
       eyebrow="Legal"

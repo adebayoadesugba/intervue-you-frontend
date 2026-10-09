@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { InfoPage, meta } from "@/components/rehearse/info-page";
+import { InfoPage, meta } from "@/components/intervue-you/info-page";
 
 export const Route = createFileRoute("/privacy")({
-  head: () => meta("Privacy Policy", "How Rehearse handles your answers, recordings and personal data."),
+  head: () => meta("Privacy Policy", "How  Intervue You handles your answers, recordings and personal data."),
   component: () => (
     <InfoPage
       eyebrow="Legal"

@@ -20,7 +20,7 @@ export function YourTurnCard({ compact }: { compact?: boolean }) {
     return () => clearInterval(id);
   }, []);
   return (
-    <div className={compact ? "space-y-4" : "glass space-y-5 rounded-3xl p-5 sm:p-7"}>
+    <div className={compact ? "space-y-4" : "glass space-y-5 rounded-xl p-5 sm:p-5"}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <div className="relative grid h-14 w-14 shrink-0 place-items-center">
           <span className="pulse-ring absolute inset-0 rounded-full bg-primary/40" />
@@ -181,7 +181,7 @@ export function HowItWorks() {
               <p className="font-display-serif text-xl">Building confidence</p>
               <p className="text-xs text-muted-foreground">Readiness 74 · <span className="text-success">up 9 this week</span></p>
               <ul className="space-y-2 text-sm">
-                {[["Day 1", "Rehearse your opening out loud", true], ["Day 2", "Teamwork session", false], ["Day 3", "Explain a difficult decision", false]].map(([d, t, done]) => (
+                {[["Day 1", " Intervue You your opening out loud", true], ["Day 2", "Teamwork session", false], ["Day 3", "Explain a difficult decision", false]].map(([d, t, done]) => (
                   <li key={t as string} className="flex items-center gap-2.5">
                     <span className={`grid h-4 w-4 shrink-0 place-items-center rounded border ${done ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}>{done && <Check className="h-3 w-3" />}</span>
                     <span className="text-muted-foreground">{d as string}</span>
