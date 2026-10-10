@@ -55,7 +55,7 @@ function Results() {
 
       // 3. Fetch from Express / MongoDB backend
       try {
-        const res = await fetch(`http://localhost:5000/api/sessions/${id}`, {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/sessions/${id}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
 

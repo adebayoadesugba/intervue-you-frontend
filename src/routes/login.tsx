@@ -57,14 +57,14 @@ function Login() {
     } catch (err) {
       setErrors({ form: (err as Error).message || "Invalid credentials. Please try again." });
     } finally {
-      setLoading(null);
+      setLoading(null); 
     }
   };
 
   const handleGoogleSuccess = async (accessToken: string) => {
     setLoading("google");
     try {
-      const res = await fetch("http://localhost:5000/api/auth/google", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/google`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: accessToken }),

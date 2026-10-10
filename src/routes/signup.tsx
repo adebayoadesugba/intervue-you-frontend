@@ -4,8 +4,10 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { AuthShell, Divider, Field, GoogleButton } from "@/components/intervue-you/auth-shell";
-import { authService } from "@/services/auth";
 import { getToken } from "@/lib/auth";
+import { storage } from "@/lib/storage";
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export const Route = createFileRoute("/signup")({
   head: () => ({
@@ -46,13 +48,25 @@ function Signup() {
 
     setLoading("form");
     try {
-      await authService.signup(f.name, f.email, f.pw);
+      // Connect to Express backend /register endpoint
+      const res = await fetch(`${API_BASE}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: f.name, email: f.email, password: f.pw }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || "Failed to create account.");
+
+      // Save token and user details so /onboarding route is authorized
+      storage.set("token", data.token);
+      storage.set("user", data.user);
+
       toast.success("Account created. Let's set up your first interview.");
       nav({ to: "/onboarding" });
     } catch (err) {
       setErrors({ form: (err as Error).message || "Failed to create account. Please try again." });
     } finally {
-      // Always stop the loading spinner whether signup succeeds or fails
       setLoading(null);
     }
   };
@@ -60,18 +74,18 @@ function Signup() {
   const handleGoogleSuccess = async (accessToken: string) => {
     try {
       setLoading("google");
-      const res = await fetch("http://localhost:5000/api/auth/google", {
+      const res = await fetch(`${API_BASE}/api/auth/google`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: accessToken }),
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
+      if (!res.ok) throw new Error(data.message || data.error);
 
-      // Store token and user details
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      // Store token and user details using storage helper
+      storage.set("token", data.token);
+      storage.set("user", data.user);
 
       toast.success("Signed up with Google.");
 
