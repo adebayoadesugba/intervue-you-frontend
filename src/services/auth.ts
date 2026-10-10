@@ -9,7 +9,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const authService = {
     login: async (email: string, pw: string) => {
-    const res = await fetch("http://localhost:5000/api/auth/login", {
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password: pw })
@@ -27,7 +27,7 @@ export const authService = {
     return data.user;
   },
   async signup(name: string, email: string, _password: string): Promise<User> {
-    await fetch("http://localhost:5000/api/auth/signup", {
+    await fetch(`${import.meta.env.VITE_API_URL}/api/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, email, password: _password })
@@ -37,7 +37,7 @@ export const authService = {
     return user;
   },
   google: async (credentialToken: string) => {
-    const res = await fetch("http://localhost:5000/api/auth/google", {
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/google`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: credentialToken }),

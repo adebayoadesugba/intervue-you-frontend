@@ -22,7 +22,7 @@ export type Session = {
 };
 
 const FASTAPI_URL = "http://127.0.0.1:8000";
-const EXPRESS_URL = "http://localhost:5000/api";
+const EXPRESS_URL = `${import.meta.env.VITE_API_URL}/api`;
 
 const BANK = [
   "Tell me about yourself and why this {role} role interests you.",
@@ -160,7 +160,7 @@ export const interviewService = {
   const token = localStorage.getItem("token");
   if (token) {
     try {
-      await fetch("http://localhost:5000/api/sessions", {
+      await fetch(`${import.meta.env.VITE_API_URL}/api/sessions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
