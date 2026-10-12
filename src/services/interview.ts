@@ -1,192 +1,248 @@
-import { storage } from "@/lib/storage";
-import type { SkillKey } from "@/data/marketing";
+import { getToken } from "@/lib/auth";
 
-export type Mode = "text" | "audio" | "video";
-export type Profile = { role: string; level: string; goal: string; cv?: string };
-export type Turn = { q: string; a: string; followUp?: boolean };
-export type Feedback = { q: string; a: string; score: number; note: string; better: string; star: Record<"S" | "T" | "A" | "R", boolean> };
-export type Session = {
-  id: string; 
-  role: string; 
-  mode: Mode; 
-  minutes: number; 
-  createdAt: number;
-  experience?: string;
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
+export interface Turn { q: string; a: string; followUp?: boolean; }
+export interface SkillScores { technical?: number; communication?: number; problemSolving?: number; teamwork?: number; }
+export interface QuestionFeedback { q: string; a: string; score: number; note: string; star: { S: boolean; T: boolean; A: boolean; R: boolean; }; better: string; }
+export interface StarAssessment { situation: string; task: string; action: string; result: string; }
+export interface SessionEvaluation { overallScore: number; readinessLabel: string; scores: SkillScores; starAssessment?: StarAssessment; feedback: QuestionFeedback[]; strengths?: string[]; improvements?: string[]; }
+
+export interface Session {
+  id: string;
+  _id?: string;
+  role: string;
+  mode: "text" | "audio" | "video";
+  minutes: number;
+  experienceLevel?: string;
   timeframe?: string;
   cv?: string;
-  turns: Turn[]; 
-  scores?: Record<SkillKey, number>; 
-  overall?: number; 
-  feedback?: Feedback[];
-  speech?: { wpm: number; fillers: number };
-};
+  createdAt: number;
+  turns: Turn[];
+  company?: string;
+  overall?: number;
+  scores?: SkillScores;
+  feedback?: QuestionFeedback[];
+  evaluation?: SessionEvaluation;
+}
 
-const FASTAPI_URL = "http://127.0.0.1:8000";
-const EXPRESS_URL = `${import.meta.env.VITE_API_URL}/api`;
+export interface CreateSessionPayload {
+  role: string;
+  mode: "text" | "audio" | "video";
+  minutes: number;
+  experienceLevel?: string;
+  timeframe?: string;
+  cv?: string;
+  company?: string;
+}
 
-const BANK = [
-  "Tell me about yourself and why this {role} role interests you.",
-  "Describe a project you're proud of. What was your specific contribution?",
-  "Tell me about a time you disagreed with a teammate. How did you resolve it?",
-  "Walk me through how you'd approach a problem you've never seen before.",
-  "What's a mistake you made at work, and what did you change afterwards?",
-  "How do you prioritise when everything feels urgent?",
-  "Where would you want to be in two years, and how does this role help?",
-];
-
-export const profileStore = {
-  get: () => storage.get<Profile | null>("profile", null),
-  set: (p: Profile) => storage.set("profile", p),
-};
-
-export const sessions = {
-  all: (): Session[] => storage.get<Session[]>("sessions", []),
-  get: (id: string) => sessions.all().find((s) => s.id === id) ?? null,
-  save(s: Session) {
-    const list = sessions.all().filter((x) => x.id !== s.id);
-    storage.set("sessions", [s, ...list]);
-  },
-};
-
-export const interviewService = {
-  create(
-    role: string, 
-    mode: Mode, 
-    minutes: number, 
-    meta?: { experience?: string; timeframe?: string; cv?: string }
-  ): Session {
-    const s: Session = { 
-      id: Math.random().toString(36).slice(2, 9), 
-      role, 
-      mode, 
-      minutes, 
-      createdAt: Date.now(), 
-      turns: [],
-      experience: meta?.experience,
-      timeframe: meta?.timeframe,
-      cv: meta?.cv
-    };
-    sessions.save(s);
-    return s;
-  },
-
-  questionCount: (minutes: number) => Math.max(3, Math.min(7, Math.round(minutes / 2))),
-
-  async nextQuestion(s: Session): Promise<{ q: string; followUp: boolean }> {
+class SessionStore {
+  private prefix = "intervue_session_";
+  get(id: string): Session | null {
+    if (typeof window === "undefined" || !id || id === "undefined") return null;
     try {
-      // 1. Check if last answer was too brief for follow-up
-      const last = s.turns[s.turns.length - 1];
-      if (last && !last.followUp && last.a.trim().split(/\s+/).length < 25) {
-        return { 
-          q: "Could you go a bit deeper? What exactly did you do, and what was the measurable result?", 
-          followUp: true 
-        };
-      }
-
-      // 2. Fetch question from AI server or fallback bank
-      const asked = s.turns.filter((t) => !t.followUp).length;
-      return { q: BANK[asked % BANK.length]!.replace("{role}", s.role), followUp: false };
-    } catch {
-      const asked = s.turns.filter((t) => !t.followUp).length;
-      return { q: BANK[asked % BANK.length]!.replace("{role}", s.role), followUp: false };
-    }
-  },
-
-  async score(s: Session): Promise<Session> {
-    let overall = 75;
-    let feedback: Feedback[] = [];
-    let scores: Record<SkillKey, number> = { technical: 75, communication: 75, problemSolving: 75, teamwork: 75 };
-
+      const stored = localStorage.getItem(`${this.prefix}${id}`);
+      return stored ? JSON.parse(stored) : null;
+    } catch (e) { return null; }
+  }
+  save(session: Session): void {
+    if (typeof window === "undefined" || !session || !session.id) return;
     try {
-      // 1. Request AI Analysis from FastAPI AI Backend
-      const aiRes = await fetch(`${FASTAPI_URL}/interview/${s.id}/report`, {
-        method: "GET",
-        headers: { "Content-Type": "application/json" }
-      });
+      localStorage.setItem(`${this.prefix}${session.id}`, JSON.stringify(session));
+      if (session._id) localStorage.setItem(`${this.prefix}${session._id}`, JSON.stringify(session));
+    } catch (e) {}
+  }
+}
 
-      if (aiRes.ok) {
-        const report = await aiRes.json();
-        overall = report.metrics?.overall_percentage ?? 75;
-        if (report.feedback) feedback = report.feedback;
-        if (report.skills) scores = report.skills;
-      }
+export const sessions = new SessionStore();
+
+// --- Add this block back into src/services/interview.ts ---
+
+export interface ProfileData {
+  role: string;
+  level?: string;
+  company?: string;
+}
+
+class ProfileStore {
+  private key = "intervue_profile";
+
+  get(): ProfileData {
+    if (typeof window === "undefined") return { role: "Software Engineer", level: "Mid-level" };
+    try {
+      const stored = localStorage.getItem(this.key);
+      if (stored) return JSON.parse(stored);
+      
+      const userProfile = localStorage.getItem("profile");
+      if (userProfile) return JSON.parse(userProfile);
     } catch (e) {
-      console.warn("AI scoring server offline, using local evaluation fallback:", e);
+      console.error("Failed to read profile from local storage:", e);
     }
-
-    // 2. Fallback local evaluation if FastAPI feedback was empty
-    if (feedback.length === 0) {
-      feedback = s.turns.map((t) => {
-        const w = t.a.split(/\s+/).filter(Boolean).length;
-        const hasNum = /\d/.test(t.a);
-        const star = { 
-          S: w > 10, 
-          T: /goal|task|needed|responsib/i.test(t.a), 
-          A: /\bI\b/.test(t.a), 
-          R: hasNum || /result|outcome|improv/i.test(t.a) 
-        };
-        const score = Math.min(95, 40 + w + (hasNum ? 10 : 0));
-        return {
-          q: t.q, 
-          a: t.a, 
-          score,
-          note: w < 25 ? "Too short — the interviewer had to guess at your impact." : hasNum ? "Clear and backed by a number. Good." : "Solid structure, but end with a concrete result.",
-          better: "Start with one line of context, say what you were responsible for, describe two actions you personally took, then finish with a measurable result.",
-          star,
-        };
-      });
-
-      const base = Math.round(feedback.reduce((n, f) => n + f.score, 0) / Math.max(1, feedback.length));
-      const jitter = (n: number) => Math.max(20, Math.min(97, base + n));
-      scores = { technical: jitter(1), communication: jitter(3), problemSolving: jitter(-2), teamwork: jitter(-4) };
-      overall = Math.round((scores.technical + scores.communication + scores.problemSolving + scores.teamwork) / 4);
-    }
-
-    const words = s.turns.reduce((n, t) => n + t.a.split(/\s+/).filter(Boolean).length, 0);
-    const fillers = s.turns.reduce((n, t) => n + (t.a.match(/\b(um|uh|like|basically|actually)\b/gi)?.length ?? 0), 0);
-
-    const out: Session = { 
-      ...s, 
-      scores, 
-      overall, 
-      feedback, 
-      speech: { wpm: s.mode === "text" ? 0 : 128 + (words % 30), fillers } 
-    };
-
-    // 3. Save locally
-    sessions.save(out);
-
-    // 4. Save to Express MongoDB Backend
-  const token = localStorage.getItem("token");
-  if (token) {
-    try {
-      await fetch(`${import.meta.env.VITE_API_URL}/api/sessions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          role: out.role,
-          experienceLevel: out.experience || "Mid-level",
-          mode: out.mode,
-          overallScore: out.overall,
-          feedback: out.feedback,
-          transcript: out.turns
-        })
-      });
-    } catch (err) {
-      console.error("Failed to persist session to MongoDB:", err);
-    }
+    return { role: "Software Engineer", level: "Mid-level" };
   }
 
-    return out;
+  save(data: ProfileData): void {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(this.key, JSON.stringify(data));
+      localStorage.setItem("profile", JSON.stringify(data));
+    } catch (e) {
+      console.error("Failed to save profile to local storage:", e);
+    }
+  }
+}
+
+export const profileStore = new ProfileStore();
+
+
+
+async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers as Record<string, string>),
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || data.message || `API request failed with status ${response.status}`);
+  return data as T;
+}
+
+export const interviewService = {
+  questionCount(minutes: number): number {
+    return minutes <= 5 ? 3 : minutes <= 10 ? 5 : 8;
   },
 
-  async coach(question: string, s: Session): Promise<string> {
-    const weakest = s.scores ? (Object.entries(s.scores).sort((a, b) => a[1] - b[1])[0]?.[0] ?? "") : "";
-    if (/star/i.test(question)) return "STAR = Situation, Task, Action, Result. Keep Situation and Task to two sentences combined, spend most time on Action, and always close with a Result you can measure.";
-    if (/improve|next|practise|practice/i.test(question)) return `Your weakest area this session was ${weakest.replace("problemSolving", "problem solving")}. Do one 10-minute session tomorrow focused on it, and aim for answers of 60–90 seconds.`;
-    return "Good question. Pick one answer from this session, rewrite it using the sample structure in the feedback, then say it out loud twice. Repetition is what makes it feel natural in the real thing.";
+  async create(payload: CreateSessionPayload): Promise<Session> {
+    const data = await apiFetch<any>("/api/interview/session", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    const raw = data.session || data;
+    const sessionId = String(raw._id || raw.id);
+
+    const formattedSession: Session = {
+      id: sessionId,
+      _id: sessionId,
+      role: raw.role || payload.role,
+      mode: raw.mode || payload.mode,
+      minutes: raw.minutes || payload.minutes,
+      experienceLevel: raw.experienceLevel || payload.experienceLevel,
+      timeframe: raw.timeframe || payload.timeframe,
+      cv: raw.cv || payload.cv,
+      createdAt: new Date(raw.createdAt || Date.now()).getTime(),
+      turns: raw.transcript || raw.turns || [],
+      company: raw.company || payload.company || "",
+    };
+
+    (formattedSession as any).session = formattedSession;
+    sessions.save(formattedSession);
+    return formattedSession;
+  },
+
+ async nextQuestion(session: Session): Promise<{ q: string; followUp: boolean }> {
+    try {
+      const targetId = session.id || session._id;
+      
+      // Clean the session object to prevent circular JSON error
+      const cleanSession = { ...session };
+      delete (cleanSession as any).session; 
+
+      const data = await apiFetch<{ q: string; followUp?: boolean }>(
+        `/api/interview/session/${targetId}/next-question`,
+        {
+          method: "POST",
+          body: JSON.stringify({ session: cleanSession }), // Send the clean session
+        }
+      );
+
+      return {
+        q: data.q || "Tell me about a challenging project you delivered and the technical trade-offs you navigated.",
+        followUp: Boolean(data.followUp),
+      };
+    } catch (err) {
+      console.error("Error fetching next question from OpenAI endpoint:", err);
+
+      const fallbackQuestions = [
+        "Tell me about a time you had a technical disagreement with a peer. How did you resolve it?",
+        "How do you approach breaking down an ambiguous product requirement into architecture and engineering tasks?",
+        "Describe a time a production bug occurred under your watch. How did you diagnose, fix, and prevent it from recurring?",
+      ];
+
+      const randomIndex = Math.floor(Math.random() * fallbackQuestions.length);
+      return {
+        q: fallbackQuestions[randomIndex],
+        followUp: false,
+      };
+    }
+  },
+
+  async score(session: Session): Promise<SessionEvaluation> {
+    const targetId = session.id || session._id;
+    const data = await apiFetch<{ evaluation?: SessionEvaluation; session?: any }>(`/api/interview/session/${targetId}/evaluate`, {
+      method: "POST",
+      body: JSON.stringify({ transcript: session.turns }),
+    });
+
+    const evaluation = data.evaluation || data.session?.evaluation;
+    if (!evaluation) throw new Error("Evaluation failed to generate");
+
+    const updatedSession: Session = {
+      ...session,
+      overall: evaluation.overallScore,
+      scores: evaluation.scores,
+      feedback: evaluation.feedback,
+      evaluation,
+    };
+    sessions.save(updatedSession);
+    return evaluation;
+  },
+
+  async coach(message: string, session: Session): Promise<string> {
+    const targetId = session.id || session._id;
+    const data = await apiFetch<{ reply: string }>(`/api/interview/session/${targetId}/coach`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+    return data.reply;
+  },
+
+  async getSession(id: string): Promise<Session | null> {
+    if (!id || id === "undefined") return null;
+    const cached = sessions.get(id);
+
+    try {
+      const data = await apiFetch<{ session: any }>(`/api/interview/session/${id}`);
+      const raw = data.session || data;
+      if (!raw) return cached;
+
+      const evalData: SessionEvaluation | undefined = raw.evaluation;
+      const sessionId = String(raw._id || raw.id || id);
+
+      const formatted: Session = {
+        id: sessionId,
+        _id: sessionId,
+        role: raw.role || "Software Engineer",
+        mode: raw.mode || "text",
+        minutes: raw.minutes || 10,
+        createdAt: new Date(raw.createdAt || Date.now()).getTime(),
+        turns: raw.transcript || raw.turns || [],
+        company: raw.company || "",
+        // FIX: Remove fake 70 defaults for unscored sessions
+        overall: evalData?.overallScore ?? raw.overallScore,
+        scores: evalData?.scores || raw.scores,
+        feedback: evalData?.feedback || raw.feedback || [],
+        evaluation: evalData,
+      };
+
+      (formatted as any).session = formatted;
+      sessions.save(formatted);
+      return formatted;
+    } catch (err) {
+      return cached;
+    }
   },
 };

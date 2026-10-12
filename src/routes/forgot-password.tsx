@@ -3,7 +3,8 @@ import { useState } from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AuthShell, Field } from "@/components/intervue-you/auth-shell";
-import { authService } from "@/services/auth";
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export const Route = createFileRoute("/forgot-password")({
   head: () => ({
@@ -30,7 +31,15 @@ function Forgot() {
     setState("loading");
 
     try {
-      await authService.resetPassword(email);
+      const res = await fetch(`${API_BASE}/api/auth/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to send reset email.");
+
       setState("sent");
     } catch (err) {
       setError((err as Error).message || "Unable to send reset email. Please try again.");
