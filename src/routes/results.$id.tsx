@@ -4,7 +4,7 @@ import { Loader2, Send } from "lucide-react";
 import { AppShell } from "@/components/intervue-you/app-shell";
 import { ScoreRing, SkillBar } from "@/components/intervue-you/primitives";
 import { SKILLS } from "@/data/marketing";
-import { interviewService, sessions, type Session } from "@/services/interview";
+import { interviewService, sessions, formatRoleName, type Session } from "@/services/interview";
 import { getToken } from "@/lib/auth";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -51,7 +51,7 @@ function Results() {
       // 2. Check local storage first (for fresh local interviews)
       const local = sessions.get(id);
       if (local && local.scores) {
-        setS(local);
+        setS({ ...local, role: formatRoleName(local.role) });
         return;
       }
 
@@ -65,10 +65,10 @@ function Results() {
 
         const data = await res.json();
 
-        // Normalize MongoDB data to match frontend layout expectations
+        // Normalize MongoDB data and format role label
         const formattedSession: Session = {
           id: data._id || data.id,
-          role: data.role || "Software Engineer",
+          role: formatRoleName(data.role || "Software Engineer"),
           mode: data.mode || "text",
           minutes: data.minutes || 10,
           createdAt: new Date(data.createdAt || Date.now()).getTime(),
@@ -144,7 +144,7 @@ function Results() {
         <ScoreRing value={s.overall!} size={120} label="Overall" />
         <div>
           <p className="text-sm text-muted-foreground">
-            {s.role} · {s.mode} · {s.turns.length} answers
+            {formatRoleName(s.role)} · {s.mode.charAt(0).toUpperCase() + s.mode.slice(1)} · {s.turns.length} answers
           </p>
           <h1 className="mt-1 text-3xl font-semibold">
             You're{" "}

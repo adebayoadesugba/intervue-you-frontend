@@ -2,6 +2,25 @@ import { getToken } from "@/lib/auth";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
+export function formatRoleName(role?: string): string {
+  if (!role) return "Software Engineer";
+  const normalized = role.toLowerCase().trim();
+  const map: Record<string, string> = {
+    frontend: "Frontend Engineer",
+    backend: "Backend Engineer",
+    "ai-engineering": "AI Engineer",
+    uiux: "UI/UX Designer",
+    "graduate-trainee": "Graduate Trainee",
+    "nysc-trainee": "NYSC Trainee",
+    copywriting: "Copywriter",
+  };
+  if (map[normalized]) return map[normalized]!;
+  return role
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 export interface Turn { q: string; a: string; followUp?: boolean; }
 export interface SkillScores { technical?: number; communication?: number; problemSolving?: number; teamwork?: number; }
 export interface QuestionFeedback { q: string; a: string; score: number; note: string; star: { S: boolean; T: boolean; A: boolean; R: boolean; }; better: string; }
@@ -34,6 +53,8 @@ export interface CreateSessionPayload {
   timeframe?: string;
   cv?: string;
   company?: string;
+  category?: string;
+  stack?: string[];
 }
 
 class SessionStore {
@@ -55,8 +76,6 @@ class SessionStore {
 }
 
 export const sessions = new SessionStore();
-
-// --- Add this block back into src/services/interview.ts ---
 
 export interface ProfileData {
   role: string;
@@ -94,8 +113,6 @@ class ProfileStore {
 
 export const profileStore = new ProfileStore();
 
-
-
 async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -127,7 +144,7 @@ export const interviewService = {
     const formattedSession: Session = {
       id: sessionId,
       _id: sessionId,
-      role: raw.role || payload.role,
+      role: formatRoleName(raw.role || payload.role),
       mode: raw.mode || payload.mode,
       minutes: raw.minutes || payload.minutes,
       experienceLevel: raw.experienceLevel || payload.experienceLevel,
@@ -143,28 +160,27 @@ export const interviewService = {
     return formattedSession;
   },
 
- async nextQuestion(session: Session): Promise<{ q: string; followUp: boolean }> {
+  async nextQuestion(session: Session): Promise<{ q: string; followUp: boolean }> {
     try {
       const targetId = session.id || session._id;
       
-      // Clean the session object to prevent circular JSON error
       const cleanSession = { ...session };
       delete (cleanSession as any).session; 
 
-      const data = await apiFetch<{ q: string; followUp?: boolean }>(
+      const data = await apiFetch<{ q: string; followUp?: boolean; is_follow_up?: boolean }>(
         `/api/interview/session/${targetId}/next-question`,
         {
           method: "POST",
-          body: JSON.stringify({ session: cleanSession }), // Send the clean session
+          body: JSON.stringify({ session: cleanSession }),
         }
       );
 
       return {
         q: data.q || "Tell me about a challenging project you delivered and the technical trade-offs you navigated.",
-        followUp: Boolean(data.followUp),
+        followUp: Boolean(data.followUp || data.is_follow_up),
       };
     } catch (err) {
-      console.error("Error fetching next question from OpenAI endpoint:", err);
+      console.error("Error fetching next question from endpoint:", err);
 
       const fallbackQuestions = [
         "Tell me about a time you had a technical disagreement with a peer. How did you resolve it?",
@@ -225,13 +241,12 @@ export const interviewService = {
       const formatted: Session = {
         id: sessionId,
         _id: sessionId,
-        role: raw.role || "Software Engineer",
+        role: formatRoleName(raw.role || "Software Engineer"),
         mode: raw.mode || "text",
         minutes: raw.minutes || 10,
         createdAt: new Date(raw.createdAt || Date.now()).getTime(),
         turns: raw.transcript || raw.turns || [],
         company: raw.company || "",
-        // FIX: Remove fake 70 defaults for unscored sessions
         overall: evalData?.overallScore ?? raw.overallScore,
         scores: evalData?.scores || raw.scores,
         feedback: evalData?.feedback || raw.feedback || [],

@@ -100,26 +100,33 @@ function Room() {
     void loadSession();
   }, [id]);
 
-  // Persistent Timer (Derived from Session `createdAt`)
+  // Persistent Timer & Auto-Submit on Duration Reached
   useEffect(() => {
-    if (!s?.createdAt) return;
+    if (!s?.createdAt || finishedRef.current) return;
+
+    const maxSeconds = (s.minutes || 10) * 60;
 
     const updateTimer = () => {
       const now = Date.now();
       const diff = Math.max(0, Math.floor((now - s.createdAt) / 1000));
       if (isMountedRef.current) setElapsed(diff);
+
+      // Auto-submit if time limit is exceeded
+      if (diff >= maxSeconds && !finishedRef.current && !thinking) {
+        console.log("⏰ Time limit reached. Auto-submitting interview...");
+        void finish(s);
+      }
     };
 
     updateTimer();
     const timerId = setInterval(updateTimer, 1000);
     return () => clearInterval(timerId);
-  }, [s?.createdAt]);
+  }, [s?.createdAt, s?.minutes, thinking]);
 
   // Video Stream Management & Leak Prevention
   useEffect(() => {
     if (s?.mode !== "video") return;
 
-    // Skip requesting media devices on mobile screens
     const isDesktop = window.matchMedia("(min-width: 640px)").matches;
     if (!isDesktop) return;
 
@@ -209,6 +216,8 @@ function Room() {
 
   // Finish Interview Handler
   const finish = async (cur: Session) => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
     speech.stop();
     recRef.current?.stop();
     setThinking(true);
@@ -217,11 +226,11 @@ function Room() {
     try {
       await interviewService.score(cur);
       if (!isMountedRef.current) return;
-      finishedRef.current = true;
       nav({ to: "/results/$id", params: { id: cur.id } });
     } catch (err) {
       console.error("Error scoring session:", err);
       if (isMountedRef.current) {
+        finishedRef.current = false; // Allow retry if scoring fails
         setScoringError("Failed to complete evaluation. Please retry.");
         setThinking(false);
       }
@@ -255,19 +264,35 @@ function Room() {
     setS(cur);
     setAnswer("");
     setQ(null);
+    setThinking(true);
 
-    const totalQuestions = interviewService.questionCount(cur.minutes);
-    const doneMain = cur.turns.filter((t) => !t.followUp).length;
-    const lastShort = !q.followUp && answer.trim().split(/\s+/).length < 25;
+    try {
+      const targetId = cur.id || cur._id;
+      const res = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/interview/session/${targetId}/next-question`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session: cur }),
+      });
+      const data = await res.json();
 
-    if (doneMain >= totalQuestions && !lastShort) {
-      return finish(cur);
+      if (data.ended || data.reason === "time_limit") {
+        await finish(cur);
+        return;
+      }
+
+      setQ({ q: data.q, followUp: Boolean(data.followUp) });
+      if (cur.mode !== "text") {
+        setSpeaking(true);
+        speech.speak(data.q, { onEnd: () => setSpeaking(false) });
+      }
+    } catch (err) {
+      console.error("Error advancing interview:", err);
+    } finally {
+      setThinking(false);
     }
-    await ask(cur);
   };
 
   const toggleMic = () => {
-    // Interrupt AI speech if active when toggling mic
     speech.stop();
 
     const W = window as unknown as { SpeechRecognition?: new () => SR; webkitSpeechRecognition?: new () => SR };
@@ -342,7 +367,15 @@ function Room() {
   }
 
   const total = interviewService.questionCount(s.minutes);
-  const mainAsked = (s.turns || []).filter((t) => !t.followUp).length;
+  const mainAskedTurns = (s.turns || []).filter((t) => !t.followUp).length;
+  
+  // Calculate current main question index without incrementing on follow-ups
+  const activeQuestionNum = q
+    ? q.followUp
+      ? Math.max(1, mainAskedTurns)
+      : Math.min(mainAskedTurns + 1, total)
+    : Math.min(mainAskedTurns, total);
+
   const mm = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
   const aiState = speaking ? "speaking" : thinking ? "thinking" : listening ? "listening" : "idle";
 
@@ -353,7 +386,7 @@ function Room() {
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-foreground">{s.role}</p>
           <p className="text-xs text-muted-foreground">
-            Question {Math.min(mainAsked + 1, total)} of {total} · {mm}
+            Question {activeQuestionNum} of {total} {q?.followUp ? "(Follow-up)" : ""} · {mm}
           </p>
         </div>
 
@@ -366,21 +399,31 @@ function Room() {
         </div>
       </header>
 
-      {/* AI Visualizer & Video Section */}
+      {/* AI Visualizer & Video Section - 70/30 Layout Split */}
       {s.mode !== "text" && (
         <div className="w-full border-b border-border bg-background p-4">
-          <div className={`mx-auto grid max-w-4xl gap-4 items-center justify-center ${s.mode === "video" ? "sm:grid-cols-2" : "grid-cols-1 max-w-md"}`}>
-            {/* AI Orb Canvas */}
-            <div className="isolate flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-2xl bg-[#09090b] text-white py-6 shadow-xl border border-zinc-800">
+          <div
+            className={`mx-auto max-w-5xl gap-4 items-center justify-center ${
+              s.mode === "video"
+                ? "grid grid-cols-1 sm:grid-cols-10"
+                : "grid grid-cols-1 max-w-md"
+            }`}
+          >
+            {/* AI Orb Canvas (30% width in video mode) */}
+            <div
+              className={`isolate flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-2xl bg-[#09090b] text-white py-6 shadow-xl border border-zinc-800 ${
+                s.mode === "video" ? "sm:col-span-3" : ""
+              }`}
+            >
               <AiOrb state={aiState} />
               <p className="font-display-serif text-sm text-zinc-400 mt-6 capitalize">
                 {aiState === "speaking" ? "speaking" : aiState === "thinking" ? "thinking…" : aiState === "listening" ? "listening…" : "ready"}
               </p>
             </div>
 
-            {/* Video Mode Preview */}
+            {/* Video Mode Preview (70% width in video mode) */}
             {s.mode === "video" && (
-              <>
+              <div className="sm:col-span-7 w-full">
                 <video
                   ref={videoRef}
                   autoPlay
@@ -398,7 +441,7 @@ function Room() {
                     Camera preview is optimized for computer screens. Switch to a laptop or desktop for video recording.
                   </p>
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -409,14 +452,25 @@ function Room() {
         <div className="mx-auto max-w-2xl space-y-4">
           {(s.turns || []).map((t, i) => (
             <div key={i} className="space-y-3">
-              <Bubble ai>{t.q}</Bubble>
+              <Bubble ai>
+                {t.followUp && (
+                  <span className="mb-1 block text-xs font-semibold text-primary uppercase tracking-wider">
+                    Follow-up
+                  </span>
+                )}
+                {t.q}
+              </Bubble>
               <Bubble>{t.a}</Bubble>
             </div>
           ))}
 
           {q && (
             <Bubble ai>
-              {q.followUp && <span className="mb-1 block text-xs font-medium text-primary">Follow-up</span>}
+              {q.followUp && (
+                <span className="mb-1 block text-xs font-semibold text-primary uppercase tracking-wider">
+                  Follow-up
+                </span>
+              )}
               {q.q}
             </Bubble>
           )}

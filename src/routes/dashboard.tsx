@@ -4,7 +4,7 @@ import { ArrowRight, MessageSquare, Mic, Video } from "lucide-react";
 import { AppShell } from "@/components/intervue-you/app-shell";
 import { ScoreRing, SkillBar } from "@/components/intervue-you/primitives";
 import { SKILLS } from "@/data/marketing";
-import { profileStore, type Profile, type Session } from "@/services/interview";
+import { profileStore, formatRoleName, type ProfileData, type Session } from "@/services/interview";
 import { storage } from "@/lib/storage";
 import { getToken } from "@/lib/auth";
 
@@ -24,13 +24,12 @@ const icons = { text: MessageSquare, audio: Mic, video: Video };
 
 function Dashboard() {
   const nav = useNavigate();
-  const [data, setData] = useState<{ p: Profile | null; list: Session[]; name: string } | null>(null);
+  const [data, setData] = useState<{ p: ProfileData | null; list: Session[]; name: string } | null>(null);
 
   useEffect(() => {
     const loadDashboardData = async () => {
       const token = getToken();
 
-      // 1. If user is not logged in, redirect to login page immediately
       if (!token) {
         nav({ to: "/login" });
         return;
@@ -40,7 +39,7 @@ function Dashboard() {
       const currentProfile = profileStore.get();
 
       try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/sessions`, {
+        const res = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/sessions`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -84,7 +83,6 @@ function Dashboard() {
   const { p, list, name } = data;
   const latest: any = list[0];
 
-  // Default fallback scores for sessions that don't have explicit score objects saved
   const defaultScores = { technical: 75, communication: 75, problemSolving: 75, teamwork: 75 };
   const latestScores = latest ? (latest.scores || defaultScores) : null;
 
@@ -92,7 +90,7 @@ function Dashboard() {
     <AppShell>
       <h1 className="text-2xl font-semibold">Welcome back, {name.split(" ")[0]}.</h1>
       <p className="mt-1 text-muted-foreground">
-        {p ? `Practising for ${p.role} · ${p.level}` : "Tell us your target role to get tailored questions."}
+        {p ? `Practising for ${formatRoleName(p.role)} · ${p.level}` : "Tell us your target role to get tailored questions."}
       </p>
 
       <div className="mt-8 grid gap-4 lg:grid-cols-3">
@@ -126,7 +124,6 @@ function Dashboard() {
         </div>
       </div>
 
-      {/* Render skill progress bars whenever at least one session exists */}
       {latest && latestScores && (
         <div className="surface-card mt-4 grid gap-4 rounded-3xl p-6 sm:grid-cols-2">
           {SKILLS.map((s) => (
@@ -158,7 +155,7 @@ function Dashboard() {
                 >
                   <I className="h-4 w-4 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{s.role}</p>
+                    <p className="truncate font-medium">{formatRoleName(s.role)}</p>
                     <p className="text-xs text-muted-foreground">
                       {new Date(s.createdAt).toLocaleDateString()} · {s.minutes || 10} min
                     </p>
