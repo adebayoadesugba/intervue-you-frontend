@@ -45,6 +45,7 @@ function Room() {
   const [elapsed, setElapsed] = useState(0);
   const [askError, setAskError] = useState<string | null>(null);
   const [scoringError, setScoringError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Refs for persistent synchronous tracking
   const recRef = useRef<SR | null>(null);
@@ -53,6 +54,7 @@ function Room() {
   const finishedRef = useRef(false);
   const isMountedRef = useRef(true);
   const askingRef = useRef(false);
+  const autoSubmitRef = useRef(false);
 
   // Unmount Safety Flag
   useEffect(() => {
@@ -112,8 +114,8 @@ function Room() {
       if (isMountedRef.current) setElapsed(diff);
 
       // Auto-submit if time limit is exceeded
-      if (diff >= maxSeconds && !finishedRef.current && !thinking) {
-        console.log("⏰ Time limit reached. Auto-submitting interview...");
+      if (diff >= maxSeconds && !finishedRef.current && !autoSubmitRef.current && !thinking) {
+        autoSubmitRef.current = true;
         void finish(s);
       }
     };
@@ -156,12 +158,12 @@ function Room() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [s?.turns?.length, q, thinking, askError, scoringError]);
 
-  // Browser Exit Protection
+  // Browser Reload / Refresh / Tab Exit Protection
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (!s || finishedRef.current) return;
       e.preventDefault();
-      e.returnValue = "An interview is currently in progress. Are you sure you want to leave?";
+      e.returnValue = "An interview is currently in progress. Reloading or leaving will disrupt your current interview.";
       return e.returnValue;
     };
 
@@ -169,50 +171,115 @@ function Room() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [s]);
 
-  // TanStack Router Navigation Blocker
+  // TanStack Router Back Navigation Blocker
   useBlocker({
     shouldBlockFn: () => {
-      if (!s || finishedRef.current || !s.turns?.length) return false;
-      return !window.confirm("Cancel this interview? Progress will be lost.");
+      if (!s || finishedRef.current) return false;
+      return !window.confirm("An interview is currently in progress. Are you sure you want to leave? Your progress will be saved up to your current answer.");
     },
   });
 
-  // Safe Question Fetcher
-  const ask = async (cur: Session) => {
-    if (askingRef.current) return;
+  // Streaming Question Fetcher
+  const speakQuestion = (cur: Session, text: string) => {
+    if (cur.mode === "text" || !text) return;
+    setSpeaking(true);
+    speech.speak(text, {
+      onEnd: () => { if (isMountedRef.current) setSpeaking(false); },
+    });
+  };
+
+  const ask = async (cur: Session, isSubmit = false) => {
+    if (askingRef.current || finishedRef.current) return;
     askingRef.current = true;
     setThinking(true);
     setAskError(null);
-
     try {
-      const next = await interviewService.nextQuestion(cur);
-      if (!isMountedRef.current) return;
-      setQ(next);
-      if (cur.mode !== "text") {
-        setSpeaking(true);
-        speech.speak(next.q, {
-          onEnd: () => {
-            if (isMountedRef.current) setSpeaking(false);
-          },
-        });
+      // Turn 1 quick-load
+      if (!isSubmit && (!cur.turns || cur.turns.length === 0) && (cur as any).pendingQuestion) {
+        const pendingQ = (cur as any).pendingQuestion;
+        setQ({ q: pendingQ, followUp: false });
+        speakQuestion(cur, pendingQ);
+        return;
       }
+      const targetId = cur.id || cur._id;
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/interview/session/${targetId}/next-question/stream`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session: cur }),
+        }
+      );
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      // Plain JSON response (e.g. turn 1 with no turns yet)
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("text/event-stream") || !res.body) {
+        const j = await res.json();
+        if (j.ended) { await finish(cur); return; }
+        if (!j.q) throw new Error("No question received");
+        setQ({ q: j.q, followUp: Boolean(j.followUp) });
+        speakQuestion(cur, j.q);
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let question = "";
+      let isFollowUp = false;
+      let firstToken = false;
+      let sessionEnded = false;
+      outer: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const events = buf.split("\n\n");
+        buf = events.pop() ?? "";   // keep the incomplete tail for the next read
+        for (const ev of events) {
+          const line = ev.split("\n").find((l) => l.startsWith("data: "));
+          if (!line) continue;
+          let data: any;
+          try { data = JSON.parse(line.slice(6)); } catch { continue; }
+          if (data.type === "error") throw new Error(data.detail || "Stream error");
+          if (data.type === "meta") {
+            isFollowUp = Boolean(data.is_follow_up);
+          } else if (data.type === "token") {
+            if (!firstToken) { setThinking(false); firstToken = true; }
+            question += data.content;
+            setQ({ q: question, followUp: isFollowUp });
+          } else if (data.type === "ended") {
+            sessionEnded = true;
+            break outer;
+          } else if (data.type === "done") {
+            if (data.next_question) {
+              question = data.next_question;
+              setQ({ q: question, followUp: Boolean(data.is_follow_up) });
+            }
+          }
+        }
+      }
+      if (sessionEnded) { await finish(cur); return; }
+      if (!question.trim()) throw new Error("No question received");
+      speakQuestion(cur, question);
     } catch (err) {
-      console.error("Failed to generate question:", err);
+      console.error("Failed to load next question:", err);
       if (isMountedRef.current) {
-        setAskError("Unable to load the next question. Please check your connection and retry.");
+        setAskError("Unable to load the next question. Please retry.");
       }
     } finally {
-      if (isMountedRef.current) setThinking(false);
       askingRef.current = false;
+      if (isMountedRef.current) setThinking(false);
     }
   };
 
   // Resume / Auto-Start Logic
   useEffect(() => {
-    if (s && !q && !thinking && !askError && !finishedRef.current && !askingRef.current) {
-      void ask(s);
+    if (
+      s && !q && !thinking && !askError && !scoringError && !isSubmitting &&
+      !finishedRef.current && !askingRef.current
+    ) {
+      void ask(s, false);
     }
-  }, [s, q, thinking, askError]);
+  }, [s, q, thinking, askError, scoringError, isSubmitting]);
 
   // Finish Interview Handler
   const finish = async (cur: Session) => {
@@ -221,6 +288,7 @@ function Room() {
     speech.stop();
     recRef.current?.stop();
     setThinking(true);
+    setIsSubmitting(true);
     setScoringError(null);
 
     try {
@@ -231,6 +299,7 @@ function Room() {
       console.error("Error scoring session:", err);
       if (isMountedRef.current) {
         finishedRef.current = false; // Allow retry if scoring fails
+        setIsSubmitting(false);
         setScoringError("Failed to complete evaluation. Please retry.");
         setThinking(false);
       }
@@ -238,7 +307,7 @@ function Room() {
   };
 
   const handleEndClick = () => {
-    if (thinking) return;
+    if (thinking || isSubmitting) return;
 
     if (s && s.turns && s.turns.length > 0) {
       if (window.confirm("End interview now and submit your answers for scoring?")) {
@@ -251,7 +320,7 @@ function Room() {
   };
 
   const submit = async () => {
-    if (!q || !answer.trim() || thinking) return;
+    if (!q || !answer.trim() || thinking || isSubmitting) return;
     recRef.current?.stop();
     speech.stop();
 
@@ -264,32 +333,9 @@ function Room() {
     setS(cur);
     setAnswer("");
     setQ(null);
-    setThinking(true);
 
-    try {
-      const targetId = cur.id || cur._id;
-      const res = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/interview/session/${targetId}/next-question`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session: cur }),
-      });
-      const data = await res.json();
-
-      if (data.ended || data.reason === "time_limit") {
-        await finish(cur);
-        return;
-      }
-
-      setQ({ q: data.q, followUp: Boolean(data.followUp) });
-      if (cur.mode !== "text") {
-        setSpeaking(true);
-        speech.speak(data.q, { onEnd: () => setSpeaking(false) });
-      }
-    } catch (err) {
-      console.error("Error advancing interview:", err);
-    } finally {
-      setThinking(false);
-    }
+    // Trigger streaming for subsequent questions
+    await ask(cur, true);
   };
 
   const toggleMic = () => {
@@ -369,18 +415,36 @@ function Room() {
   const total = interviewService.questionCount(s.minutes);
   const mainAskedTurns = (s.turns || []).filter((t) => !t.followUp).length;
   
-  // Calculate current main question index without incrementing on follow-ups
   const activeQuestionNum = q
     ? q.followUp
       ? Math.max(1, mainAskedTurns)
       : Math.min(mainAskedTurns + 1, total)
     : Math.min(mainAskedTurns, total);
 
-  const mm = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+  // --- COUNTDOWN TIMER (Counts down from chosen minutes to 0:00) ---
+  const totalDurationSeconds = (s.minutes || 10) * 60;
+  const remainingSeconds = Math.max(0, totalDurationSeconds - elapsed);
+  const mm = `${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(2, "0")}`;
+  
   const aiState = speaking ? "speaking" : thinking ? "thinking" : listening ? "listening" : "idle";
 
   return (
-    <div className="pt-safe pb-safe flex h-dvh flex-col bg-background text-foreground">
+    <div className="relative pt-safe pb-safe flex h-dvh flex-col bg-background text-foreground">
+      {/* Submission Modal Banner */}
+      {isSubmitting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
+          <div className="flex flex-col items-center justify-center rounded-3xl border border-border bg-card p-8 text-center shadow-2xl max-w-md w-full space-y-4">
+            <div className="rounded-full bg-primary/10 p-4 text-primary">
+              <Loader2 className="h-10 w-10 animate-spin" />
+            </div>
+            <h2 className="text-xl font-bold tracking-tight">Interview Completed</h2>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Submitting interview for assessment...
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header Bar */}
       <header className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
         <div className="min-w-0">
@@ -392,14 +456,14 @@ function Room() {
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <Button variant="pillGhost" size="sm" onClick={handleEndClick} disabled={thinking}>
+          <Button variant="pillGhost" size="sm" onClick={handleEndClick} disabled={thinking || isSubmitting}>
             <X className="mr-1 h-4 w-4" />
             End
           </Button>
         </div>
       </header>
 
-      {/* AI Visualizer & Video Section - 70/30 Layout Split */}
+      {/* AI Visualizer & Video Section */}
       {s.mode !== "text" && (
         <div className="w-full border-b border-border bg-background p-4">
           <div
@@ -409,7 +473,6 @@ function Room() {
                 : "grid grid-cols-1 max-w-md"
             }`}
           >
-            {/* AI Orb Canvas (30% width in video mode) */}
             <div
               className={`isolate flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-2xl bg-[#09090b] text-white py-6 shadow-xl border border-zinc-800 ${
                 s.mode === "video" ? "sm:col-span-3" : ""
@@ -421,7 +484,6 @@ function Room() {
               </p>
             </div>
 
-            {/* Video Mode Preview (70% width in video mode) */}
             {s.mode === "video" && (
               <div className="sm:col-span-7 w-full">
                 <video
@@ -464,7 +526,8 @@ function Room() {
             </div>
           ))}
 
-          {q && (
+          {/* Renders AI question bubble ONLY when text is present to prevent empty white containers */}
+          {q && q.q && (
             <Bubble ai>
               {q.followUp && (
                 <span className="mb-1 block text-xs font-semibold text-primary uppercase tracking-wider">
@@ -489,7 +552,7 @@ function Room() {
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 <span>{askError}</span>
               </div>
-              <Button size="sm" variant="outline" onClick={() => void ask(s)}>
+              <Button size="sm" variant="outline" onClick={() => void ask(s, true)}>
                 <RefreshCw className="mr-1 h-3.5 w-3.5" /> Retry
               </Button>
             </div>
@@ -532,7 +595,7 @@ function Room() {
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
             rows={2}
-            disabled={!q || thinking}
+            disabled={!q || thinking || isSubmitting}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
@@ -545,7 +608,7 @@ function Room() {
 
           <button
             type="submit"
-            disabled={!q || !answer.trim() || thinking}
+            disabled={!q || !answer.trim() || thinking || isSubmitting}
             aria-label="Send answer"
             className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground disabled:opacity-40 hover:opacity-90 transition-opacity"
           >

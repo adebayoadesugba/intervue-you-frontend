@@ -13,8 +13,6 @@ export const Route = createFileRoute("/dashboard")({
     meta: [
       { title: "Dashboard — Intervue You" },
       { name: "description", content: "Your interview readiness, skill scores and recent practice sessions." },
-      { property: "og:title", content: "Dashboard — Intervue You" },
-      { property: "og:description", content: "Track your interview readiness over time." },
     ],
   }),
   component: Dashboard,
@@ -38,6 +36,25 @@ function Dashboard() {
       const user = storage.get<{ name?: string }>("user", {});
       const currentProfile = profileStore.get();
 
+      // Gather local sessions stored in localStorage as fallback
+      const localSessions: Session[] = [];
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith("intervue_session_") && !key.includes("undefined")) {
+            const item = localStorage.getItem(key);
+            if (item) {
+              const parsed = JSON.parse(item);
+              if (parsed && (parsed.id || parsed._id)) {
+                localSessions.push(parsed);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Could not read local session fallback:", e);
+      }
+
       try {
         const res = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/sessions`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -45,15 +62,38 @@ function Dashboard() {
 
         if (res.ok) {
           const history = await res.json();
+          
+          // Safely extract session list from array or wrapper object ({ sessions: [...] }, { data: [...] })
+          const apiList: Session[] = Array.isArray(history)
+            ? history
+            : Array.isArray(history?.sessions)
+            ? history.sessions
+            : Array.isArray(history?.data)
+            ? history.data
+            : [];
+
+          // Deduplicate and combine API sessions with LocalStorage sessions
+          const combinedMap = new Map<string, Session>();
+          [...apiList, ...localSessions].forEach((s) => {
+            const sId = String(s._id || s.id);
+            if (sId && sId !== "undefined") {
+              combinedMap.set(sId, s);
+            }
+          });
+
+          const mergedList = Array.from(combinedMap.values()).sort(
+            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          );
+
           setData({
             p: currentProfile,
-            list: history,
+            list: mergedList,
             name: user.name || "there",
           });
         } else {
           setData({
             p: currentProfile,
-            list: [],
+            list: localSessions,
             name: user.name || "there",
           });
         }
@@ -61,7 +101,7 @@ function Dashboard() {
         console.error("Failed to load sessions from Express:", err);
         setData({
           p: currentProfile,
-          list: [],
+          list: localSessions,
           name: user.name || "there",
         });
       }
@@ -83,14 +123,41 @@ function Dashboard() {
   const { p, list, name } = data;
   const latest: any = list[0];
 
-  const defaultScores = { technical: 75, communication: 75, problemSolving: 75, teamwork: 75 };
-  const latestScores = latest ? (latest.scores || defaultScores) : null;
+  // Extract score values directly from report or evaluation competencies
+  const latestReport = latest?.evaluation?.report || latest?.report;
+  const latestCompetencies = latestReport?.competencies;
+
+  const derivedScores = {
+    technical:
+      latestCompetencies?.technical_depth?.score ??
+      latest?.scores?.technical ??
+      0,
+    communication:
+      latestCompetencies?.communication?.score ??
+      latest?.scores?.communication ??
+      0,
+    problemSolving:
+      latestCompetencies?.problem_solving?.score ??
+      latest?.scores?.problemSolving ??
+      0,
+    teamwork:
+      latestCompetencies?.teamwork?.score ??
+      latest?.scores?.teamwork ??
+      0,
+  };
+
+  const overallScore =
+    latestReport?.overall_score ??
+    latest?.evaluation?.overallScore ??
+    latest?.overallScore ??
+    latest?.overall ??
+    0;
 
   return (
     <AppShell>
       <h1 className="text-2xl font-semibold">Welcome back, {name.split(" ")[0]}.</h1>
       <p className="mt-1 text-muted-foreground">
-        {p ? `Practising for ${formatRoleName(p.role)} · ${p.level}` : "Tell us your target role to get tailored questions."}
+        {p ? `Practising for ${formatRoleName(p.role)} · ${p.level}` : "Select your target role to get tailored questions."}
       </p>
 
       <div className="mt-8 grid gap-4 lg:grid-cols-3">
@@ -110,12 +177,12 @@ function Dashboard() {
         </div>
 
         <div className="surface-card flex items-center gap-5 rounded-3xl p-6">
-          <ScoreRing value={latest?.overallScore ?? latest?.overall ?? 0} label="Readiness" />
+          <ScoreRing value={overallScore} label="Readiness" />
           <div>
             <p className="text-sm text-muted-foreground">Readiness</p>
             <p className="font-display-serif text-2xl">
               {latest
-                ? (latest.overallScore ?? latest.overall) >= 70
+                ? overallScore >= 70
                   ? "ready"
                   : "getting there"
                 : "not started"}
@@ -124,13 +191,13 @@ function Dashboard() {
         </div>
       </div>
 
-      {latest && latestScores && (
+      {latest && (
         <div className="surface-card mt-4 grid gap-4 rounded-3xl p-6 sm:grid-cols-2">
           {SKILLS.map((s) => (
             <SkillBar
               key={s.key}
               skill={s.key}
-              value={latestScores[s.key] ?? 75}
+              value={derivedScores[s.key as keyof typeof derivedScores] ?? 75}
             />
           ))}
         </div>
@@ -146,6 +213,13 @@ function Dashboard() {
           {list.map((s: any) => {
             const sessionId = s._id || s.id;
             const I = icons[s.mode as keyof typeof icons] || icons.text;
+            const sessionOverall =
+              s.evaluation?.report?.overall_score ??
+              s.report?.overall_score ??
+              s.overallScore ??
+              s.overall ??
+              "—";
+
             return (
               <li key={sessionId}>
                 <Link
@@ -160,9 +234,7 @@ function Dashboard() {
                       {new Date(s.createdAt).toLocaleDateString()} · {s.minutes || 10} min
                     </p>
                   </div>
-                  <span className="font-semibold tabular-nums">
-                    {s.overallScore ?? s.overall ?? "—"}
-                  </span>
+                  <span className="font-semibold tabular-nums">{sessionOverall}</span>
                 </Link>
               </li>
             );

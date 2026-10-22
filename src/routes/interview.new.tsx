@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { Loader2, Play } from "lucide-react";
+import { Loader2, Play, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppShell } from "@/components/intervue-you/app-shell";
 import { interviewService } from "@/services/interview";
@@ -9,7 +9,6 @@ export const Route = createFileRoute("/interview/new")({
   component: NewInterview,
 });
 
-// Role categories matching backend FastAPI ladders
 const ROLE_OPTIONS = [
   { value: "frontend", label: "Frontend Engineer" },
   { value: "backend", label: "Backend Engineer" },
@@ -20,7 +19,6 @@ const ROLE_OPTIONS = [
   { value: "copywriting", label: "Copywriting" },
 ];
 
-// Difficulty mapping per category
 const DIFFICULTY_MAP: Record<string, { value: string; label: string }[]> = {
   "graduate-trainee": [{ value: "general", label: "General" }],
   "nysc-trainee": [{ value: "general", label: "General" }],
@@ -41,31 +39,30 @@ const DEFAULT_DIFFICULTIES = [
   { value: "senior", label: "Senior" },
 ];
 
-// Dynamic stack options per category
 const STACK_OPTIONS: Record<string, { value: string; label: string }[]> = {
   frontend: [
-    { value: "core", label: "Core (HTML/CSS/JS)" },
+    { value: "core", label: "Core Fundamentals" },
     { value: "react", label: "React" },
     { value: "vue", label: "Vue.js" },
     { value: "nextjs", label: "Next.js" },
   ],
   backend: [
-    { value: "core", label: "Core Backend Concepts" },
+    { value: "core", label: "Core Fundamentals" },
     { value: "nodejs", label: "Node.js / Express" },
     { value: "django", label: "Python / Django" },
     { value: "fastapi", label: "Python / FastAPI" },
     { value: "mongodb", label: "MongoDB / NoSQL" },
   ],
   "ai-engineering": [
-    { value: "core", label: "Core AI & LLM Prompting" },
+    { value: "core", label: "Core AI & Prompting" },
     { value: "python", label: "Python & Data Science" },
-    { value: "langchain", label: "LangChain & RAG Architectures" },
+    { value: "langchain", label: "LangChain & RAG" },
     { value: "pytorch", label: "PyTorch & Fine-Tuning" },
   ],
   uiux: [
-    { value: "core", label: "Core Design Fundamentals" },
+    { value: "core", label: "Design Fundamentals" },
     { value: "figma", label: "Figma & Design Systems" },
-    { value: "prototyping", label: "User Research & Prototyping" },
+    { value: "prototyping", label: "Prototyping" },
   ],
 };
 
@@ -77,29 +74,35 @@ function NewInterview() {
   const [mode, setMode] = useState<"text" | "audio" | "video">("text");
   const [minutes, setMinutes] = useState(10);
   const [experience, setExperience] = useState("mid");
-  const [selectedStack, setSelectedStack] = useState("core");
+  const [selectedStacks, setSelectedStacks] = useState<string[]>(["core"]);
   const [company, setCompany] = useState("");
   const [cv, setCv] = useState("");
   const [timeframe, setTimeframe] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Derive allowed difficulty and stack lists for current role
   const allowedDifficulties = DIFFICULTY_MAP[role] || DEFAULT_DIFFICULTIES;
   const allowedStacks = STACK_OPTIONS[role] || DEFAULT_STACKS;
 
-  // Handle dynamic dropdown resets when switching roles
   useEffect(() => {
     const diffValues = allowedDifficulties.map((d) => d.value);
     if (!diffValues.includes(experience)) {
       setExperience(diffValues[0] || "junior");
     }
 
-    const stackValues = allowedStacks.map((s) => s.value);
-    if (!stackValues.includes(selectedStack)) {
-      setSelectedStack(stackValues[0] || "core");
-    }
+    // Reset stacks on role change
+    setSelectedStacks(["core"]);
   }, [role]);
+
+  const toggleStack = (stackValue: string) => {
+    if (selectedStacks.includes(stackValue)) {
+      if (selectedStacks.length === 1) return; // Keep at least 1 stack selected
+      setSelectedStacks(selectedStacks.filter((s) => s !== stackValue));
+    } else {
+      if (selectedStacks.length >= 3) return; // Limit to max 3 selected stacks
+      setSelectedStacks([...selectedStacks, stackValue]);
+    }
+  };
 
   const start = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,11 +118,11 @@ function NewInterview() {
         mode,
         minutes,
         experienceLevel: experience,
-        stack: [selectedStack],
+        stack: selectedStacks,
         timeframe,
         cv,
         company,
-      } as any);
+      });
 
       const targetId = s.id || s._id;
       if (!targetId || targetId === "undefined") {
@@ -140,7 +143,7 @@ function NewInterview() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold tracking-tight">Configure Your Interview</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Select your target role, stack focus, mode, and time limit to start practice.
+            Select your target role, stack focus (up to 3 max), mode, and duration.
           </p>
         </div>
 
@@ -167,37 +170,46 @@ function NewInterview() {
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            {/* Dynamic Experience Level Dropdown */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Difficulty / Experience</label>
-              <select
-                value={experience}
-                onChange={(e) => setExperience(e.target.value)}
-                className="h-11 w-full rounded-2xl border border-input bg-card px-4 text-sm outline-none focus:border-primary"
-              >
-                {allowedDifficulties.map((d) => (
-                  <option key={d.value} value={d.value}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium"> Experience</label>
+            <select
+              value={experience}
+              onChange={(e) => setExperience(e.target.value)}
+              className="h-11 w-full rounded-2xl border border-input bg-card px-4 text-sm outline-none focus:border-primary"
+            >
+              {allowedDifficulties.map((d) => (
+                <option key={d.value} value={d.value}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            {/* Dynamic Tech Stack Dropdown */}
-            <div className="space-y-2">
+          {/* Multi-Select Tech Stack Focus (Max 3) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
               <label className="text-sm font-medium">Tech Stack Focus</label>
-              <select
-                value={selectedStack}
-                onChange={(e) => setSelectedStack(e.target.value)}
-                className="h-11 w-full rounded-2xl border border-input bg-card px-4 text-sm outline-none focus:border-primary"
-              >
-                {allowedStacks.map((st) => (
-                  <option key={st.value} value={st.value}>
+              <span className="text-xs text-muted-foreground">Select up to 3 max</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {allowedStacks.map((st) => {
+                const isSelected = selectedStacks.includes(st.value);
+                return (
+                  <button
+                    key={st.value}
+                    type="button"
+                    onClick={() => toggleStack(st.value)}
+                    className={`flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-medium transition-colors ${
+                      isSelected
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-card text-muted-foreground hover:bg-accent"
+                    }`}
+                  >
+                    {isSelected && <Check className="h-3.5 w-3.5" />}
                     {st.label}
-                  </option>
-                ))}
-              </select>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -207,7 +219,7 @@ function NewInterview() {
               type="text"
               value={company}
               onChange={(e) => setCompany(e.target.value)}
-              placeholder="e.g. Google, Stripe"
+              placeholder="e.g. Stripe, Google"
               className="h-11 w-full rounded-2xl border border-input bg-card px-4 text-sm outline-none focus:border-primary"
             />
           </div>
@@ -217,7 +229,7 @@ function NewInterview() {
             <textarea
               value={cv}
               onChange={(e) => setCv(e.target.value)}
-              placeholder="Paste your resume or key background details here so the AI can tailor questions to your experience..."
+              placeholder="Paste your resume or project background text here so the AI can extract experience details..."
               rows={3}
               className="w-full resize-none rounded-2xl border border-input bg-card p-4 text-sm outline-none focus:border-primary"
             />
@@ -246,7 +258,7 @@ function NewInterview() {
           <div className="space-y-2">
             <label className="text-sm font-medium">Duration</label>
             <div className="grid grid-cols-3 gap-3">
-              {[10, 15, 20, 30, 40, 60].map((mins) => (
+              {[15, 20, 30, 40,].map((mins) => (
                 <button
                   key={mins}
                   type="button"

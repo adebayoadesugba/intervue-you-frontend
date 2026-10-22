@@ -15,6 +15,7 @@ export const Route = createFileRoute("/login")({
       { name: "description", content: "Log in to Intervue You to continue practising interviews and track your readiness." },
       { property: "og:title", content: "Log in — Intervue You" },
       { property: "og:description", content: "Pick up where you left off with your AI mock interviews." },
+      { name: "robots", content: "noindex" },
     ],
   }),
   component: Login,
@@ -47,9 +48,15 @@ function Login() {
       const u = await authService.login(email, pw);
       toast.success(`Welcome back, ${u.name}.`);
 
-      // Check if profile was returned from the API or existing storage
       const profile = storage.get("profile", null);
-      if (profile) {
+      const isOnboarded = Boolean(
+        (u as any)?.hasCompletedOnboarding ||
+        storage.get("onboarded", false) ||
+        profile
+      );
+
+      if (isOnboarded) {
+        storage.set("onboarded", true);
         nav({ to: "/dashboard" });
       } else {
         nav({ to: "/onboarding" });
@@ -57,14 +64,14 @@ function Login() {
     } catch (err) {
       setErrors({ form: (err as Error).message || "Invalid credentials. Please try again." });
     } finally {
-      setLoading(null); 
+      setLoading(null);
     }
   };
 
   const handleGoogleSuccess = async (accessToken: string) => {
     setLoading("google");
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/google`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/auth/google`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: accessToken }),
@@ -76,15 +83,21 @@ function Login() {
       storage.set("token", data.token);
       storage.set("user", data.user);
 
-      // Store profile returned from backend if user has completed onboarding before
       if (data.profile) {
         storage.set("profile", data.profile);
       }
 
       toast.success(`Welcome back, ${data.user.name || "user"}.`);
 
-      // If backend returned a profile or local storage has it, skip onboarding
-      if (data.profile || storage.get("profile", null)) {
+      const isOnboarded = Boolean(
+        data.user?.hasCompletedOnboarding ||
+        data.profile ||
+        storage.get("onboarded", false) ||
+        storage.get("profile", null)
+      );
+
+      if (isOnboarded) {
+        storage.set("onboarded", true);
         nav({ to: "/dashboard" });
       } else {
         nav({ to: "/onboarding" });
@@ -102,11 +115,30 @@ function Login() {
       <GoogleButton onSuccess={handleGoogleSuccess} onClick={() => {}} loading={loading === "google"} />
       <Divider />
       <form onSubmit={submit} noValidate className="space-y-4">
-        <Field label="Email" name="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} error={errors.email} placeholder="you@example.com" />
-        <Field label="Password" name="password" type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} error={errors.pw} />
-        
+        <Field
+          label="Email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          error={errors.email}
+          placeholder="you@example.com"
+        />
+        <Field
+          label="Password"
+          name="password"
+          type="password"
+          autoComplete="current-password"
+          value={pw}
+          onChange={(e) => setPw(e.target.value)}
+          error={errors.pw}
+        />
+
         <div className="flex justify-end">
-          <Link to="/forgot-password" className="text-sm text-primary hover:underline">Forgot password?</Link>
+          <Link to="/forgot-password" className="text-sm text-primary hover:underline">
+            Forgot password?
+          </Link>
         </div>
 
         {errors.form && (
@@ -122,7 +154,10 @@ function Login() {
       </form>
 
       <p className="mt-6 text-center text-sm text-muted-foreground">
-        New to Intervue You? <Link to="/signup" className="text-primary hover:underline">Create an account</Link>
+        New to Intervue You?{" "}
+        <Link to="/signup" className="text-primary hover:underline">
+          Create an account
+        </Link>
       </p>
     </AuthShell>
   );

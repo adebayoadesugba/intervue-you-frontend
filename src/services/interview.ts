@@ -21,19 +21,75 @@ export function formatRoleName(role?: string): string {
     .join(" ");
 }
 
-export interface Turn { q: string; a: string; followUp?: boolean; }
-export interface SkillScores { technical?: number; communication?: number; problemSolving?: number; teamwork?: number; }
-export interface QuestionFeedback { q: string; a: string; score: number; note: string; star: { S: boolean; T: boolean; A: boolean; R: boolean; }; better: string; }
-export interface StarAssessment { situation: string; task: string; action: string; result: string; }
-export interface SessionEvaluation { overallScore: number; readinessLabel: string; scores: SkillScores; starAssessment?: StarAssessment; feedback: QuestionFeedback[]; strengths?: string[]; improvements?: string[]; }
+export interface Turn {
+  q: string;
+  a: string;
+  followUp?: boolean;
+}
+
+export interface SkillScores {
+  technical?: number | null;
+  communication?: number | null;
+  problemSolving?: number | null;
+  teamwork?: number | null;
+}
+
+export interface CompetencyDetail {
+  score: number | null;
+  status: "assessed" | "not_assessed" | string;
+  evidence_quote: string | null;
+  evidence_verified: boolean;
+}
+
+export interface ReportData {
+  overall_summary?: string;
+  overall_score?: number;
+  strengths?: string[];
+  areas_for_improvement?: string[];
+  difficulty_progression_note?: string;
+  follow_up_count?: number;
+  incomplete_technical_slots?: number;
+  competencies?: {
+    technical_depth?: CompetencyDetail;
+    problem_solving?: CompetencyDetail;
+    communication?: CompetencyDetail;
+    teamwork?: CompetencyDetail;
+  };
+  session_meta?: {
+    prompt_version?: string;
+    rubric_version?: string;
+    question_bank_version?: string;
+  };
+}
+
+export interface FeedbackItem {
+  q: string;
+  a: string;
+  score: number;
+  note: string;
+  star?: { S: boolean; T: boolean; A: boolean; R: boolean } | null;
+  better: string;
+}
+
+export interface SessionEvaluation {
+  overallScore: number;
+  readinessLabel?: string;
+  scores: SkillScores;
+  feedback: FeedbackItem[];
+  strengths?: string[];
+  improvements?: string[];
+  report?: ReportData;
+}
 
 export interface Session {
   id: string;
   _id?: string;
+  pendingQuestion?: string;
   role: string;
   mode: "text" | "audio" | "video";
   minutes: number;
   experienceLevel?: string;
+  stack?: string[];
   timeframe?: string;
   cv?: string;
   createdAt: number;
@@ -41,8 +97,10 @@ export interface Session {
   company?: string;
   overall?: number;
   scores?: SkillScores;
-  feedback?: QuestionFeedback[];
+  speech?: { wpm: number; fillers: number };
+  feedback?: FeedbackItem[];
   evaluation?: SessionEvaluation;
+  report?: ReportData;
 }
 
 export interface CreateSessionPayload {
@@ -64,7 +122,9 @@ class SessionStore {
     try {
       const stored = localStorage.getItem(`${this.prefix}${id}`);
       return stored ? JSON.parse(stored) : null;
-    } catch (e) { return null; }
+    } catch (e) {
+      return null;
+    }
   }
   save(session: Session): void {
     if (typeof window === "undefined" || !session || !session.id) return;
@@ -91,7 +151,6 @@ class ProfileStore {
     try {
       const stored = localStorage.getItem(this.key);
       if (stored) return JSON.parse(stored);
-      
       const userProfile = localStorage.getItem("profile");
       if (userProfile) return JSON.parse(userProfile);
     } catch (e) {
@@ -127,9 +186,24 @@ async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise
   return data as T;
 }
 
+function normalizeTurns(raw: any): Turn[] {
+  const list = raw?.transcript || raw?.turns || [];
+  if (!Array.isArray(list)) return [];
+  return list.map((t: any) => ({
+    q: t.q ?? t.question ?? "",
+    a: t.a ?? t.userAnswer ?? "",
+    followUp: Boolean(t.followUp),
+  }));
+}
+
 export const interviewService = {
   questionCount(minutes: number): number {
-    return minutes <= 5 ? 3 : minutes <= 10 ? 5 : 8;
+    
+    if (minutes <= 10) return 4;  // 3 Base + 1 Tech
+    if (minutes <= 15) return 5;  // 3 Base + 2 Tech
+    if (minutes <= 20) return 6;  // 3 Base + 3 Tech
+    if (minutes <= 30) return 7;  // 3 Base + 4 Tech
+    return 8;                     // 3 Base + 5 Tech
   },
 
   async create(payload: CreateSessionPayload): Promise<Session> {
@@ -144,74 +218,56 @@ export const interviewService = {
     const formattedSession: Session = {
       id: sessionId,
       _id: sessionId,
+      pendingQuestion: raw.pendingQuestion,
       role: formatRoleName(raw.role || payload.role),
       mode: raw.mode || payload.mode,
       minutes: raw.minutes || payload.minutes,
       experienceLevel: raw.experienceLevel || payload.experienceLevel,
+      stack: raw.stack || payload.stack || ["core"],
       timeframe: raw.timeframe || payload.timeframe,
       cv: raw.cv || payload.cv,
       createdAt: new Date(raw.createdAt || Date.now()).getTime(),
-      turns: raw.transcript || raw.turns || [],
+      turns: normalizeTurns(raw),
       company: raw.company || payload.company || "",
     };
 
-    (formattedSession as any).session = formattedSession;
     sessions.save(formattedSession);
     return formattedSession;
   },
 
-  async nextQuestion(session: Session): Promise<{ q: string; followUp: boolean }> {
-    try {
-      const targetId = session.id || session._id;
-      
-      const cleanSession = { ...session };
-      delete (cleanSession as any).session; 
-
-      const data = await apiFetch<{ q: string; followUp?: boolean; is_follow_up?: boolean }>(
-        `/api/interview/session/${targetId}/next-question`,
-        {
-          method: "POST",
-          body: JSON.stringify({ session: cleanSession }),
-        }
-      );
-
-      return {
-        q: data.q || "Tell me about a challenging project you delivered and the technical trade-offs you navigated.",
-        followUp: Boolean(data.followUp || data.is_follow_up),
-      };
-    } catch (err) {
-      console.error("Error fetching next question from endpoint:", err);
-
-      const fallbackQuestions = [
-        "Tell me about a time you had a technical disagreement with a peer. How did you resolve it?",
-        "How do you approach breaking down an ambiguous product requirement into architecture and engineering tasks?",
-        "Describe a time a production bug occurred under your watch. How did you diagnose, fix, and prevent it from recurring?",
-      ];
-
-      const randomIndex = Math.floor(Math.random() * fallbackQuestions.length);
-      return {
-        q: fallbackQuestions[randomIndex],
-        followUp: false,
-      };
-    }
-  },
-
   async score(session: Session): Promise<SessionEvaluation> {
     const targetId = session.id || session._id;
-    const data = await apiFetch<{ evaluation?: SessionEvaluation; session?: any }>(`/api/interview/session/${targetId}/evaluate`, {
-      method: "POST",
-      body: JSON.stringify({ transcript: session.turns }),
-    });
+    const data = await apiFetch<{ evaluation?: SessionEvaluation; session?: any; report?: ReportData }>(
+      `/api/interview/session/${targetId}/evaluate`,
+      {
+        method: "POST",
+        body: JSON.stringify({ transcript: session.turns }),
+      }
+    );
 
-    const evaluation = data.evaluation || data.session?.evaluation;
-    if (!evaluation) throw new Error("Evaluation failed to generate");
+    const raw = data.session || data;
+    const reportData: ReportData | undefined = data.report || raw?.report || raw?.evaluation?.report;
+
+    const evaluation: SessionEvaluation = data.evaluation || raw?.evaluation || {
+      overallScore: reportData?.overall_score ?? raw?.overallScore ?? 0,
+      scores: raw?.scores || {
+        technical: reportData?.competencies?.technical_depth?.score ?? null,
+        communication: reportData?.competencies?.communication?.score ?? null,
+        problemSolving: reportData?.competencies?.problem_solving?.score ?? null,
+        teamwork: reportData?.competencies?.teamwork?.score ?? null,
+      },
+      feedback: raw?.feedback || [],
+      strengths: reportData?.strengths,
+      improvements: reportData?.areas_for_improvement,
+      report: reportData,
+    };
 
     const updatedSession: Session = {
       ...session,
       overall: evaluation.overallScore,
       scores: evaluation.scores,
-      feedback: evaluation.feedback,
       evaluation,
+      report: reportData || evaluation.report,
     };
     sessions.save(updatedSession);
     return evaluation;
@@ -236,24 +292,36 @@ export const interviewService = {
       if (!raw) return cached;
 
       const evalData: SessionEvaluation | undefined = raw.evaluation;
+      const reportData: ReportData | undefined = raw.report || evalData?.report || cached?.report;
       const sessionId = String(raw._id || raw.id || id);
+      const remoteTurns = normalizeTurns(raw);
 
       const formatted: Session = {
         id: sessionId,
         _id: sessionId,
+        pendingQuestion: raw.pendingQuestion ?? cached?.pendingQuestion,
         role: formatRoleName(raw.role || "Software Engineer"),
         mode: raw.mode || "text",
         minutes: raw.minutes || 10,
-        createdAt: new Date(raw.createdAt || Date.now()).getTime(),
-        turns: raw.transcript || raw.turns || [],
-        company: raw.company || "",
-        overall: evalData?.overallScore ?? raw.overallScore,
-        scores: evalData?.scores || raw.scores,
-        feedback: evalData?.feedback || raw.feedback || [],
+        experienceLevel: raw.experienceLevel ?? cached?.experienceLevel,
+        stack: raw.stack || cached?.stack || ["core"],
+        timeframe: raw.timeframe ?? cached?.timeframe,
+        cv: raw.cv ?? cached?.cv,
+        createdAt: new Date(raw.createdAt || cached?.createdAt || Date.now()).getTime(),
+        turns: (cached?.turns?.length ?? 0) > remoteTurns.length ? cached!.turns : remoteTurns,
+        company: raw.company || cached?.company || "",
+        overall: reportData?.overall_score ?? evalData?.overallScore ?? raw.overallScore,
+        scores: evalData?.scores || raw.scores || {
+          technical: reportData?.competencies?.technical_depth?.score ?? null,
+          communication: reportData?.competencies?.communication?.score ?? null,
+          problemSolving: reportData?.competencies?.problem_solving?.score ?? null,
+          teamwork: reportData?.competencies?.teamwork?.score ?? null,
+        },
+        feedback: typeof raw.feedback === "string" ? JSON.parse(raw.feedback) : (raw.feedback || evalData?.feedback || cached?.feedback || []),
         evaluation: evalData,
+        report: reportData,
       };
 
-      (formatted as any).session = formatted;
       sessions.save(formatted);
       return formatted;
     } catch (err) {
