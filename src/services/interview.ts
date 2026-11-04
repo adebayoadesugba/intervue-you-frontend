@@ -133,6 +133,12 @@ class SessionStore {
       if (session._id) localStorage.setItem(`${this.prefix}${session._id}`, JSON.stringify(session));
     } catch (e) {}
   }
+  remove(id: string): void {
+    if (typeof window === "undefined" || !id) return;
+    try {
+      localStorage.removeItem(`${this.prefix}${id}`);
+    } catch (e) {}
+  }
 }
 
 export const sessions = new SessionStore();
@@ -201,9 +207,9 @@ export const interviewService = {
     
     if (minutes <= 10) return 4;  // 3 Base + 1 Tech
     if (minutes <= 15) return 5;  // 3 Base + 2 Tech
-    if (minutes <= 20) return 6;  // 3 Base + 3 Tech
-    if (minutes <= 30) return 7;  // 3 Base + 4 Tech
-    return 8;                     // 3 Base + 5 Tech
+    if (minutes <= 20) return 7;  // 3 Base + 4 Tech
+    if (minutes <= 30) return 9;  // 3 Base + 6 Tech
+    return 11;                    // 3 Base + 8 Tech
   },
 
   async create(payload: CreateSessionPayload): Promise<Session> {
@@ -326,6 +332,17 @@ export const interviewService = {
       return formatted;
     } catch (err) {
       return cached;
+    }
+  },
+
+  async delete(id: string): Promise<boolean> {
+    sessions.remove(id);
+    try {
+      await apiFetch(`/api/interview/session/${id}`, { method: "DELETE" });
+      return true;
+    } catch (err) {
+      console.error("Failed to delete session remotely", err);
+      return false;
     }
   },
 };

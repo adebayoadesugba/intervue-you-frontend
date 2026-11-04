@@ -49,15 +49,19 @@ const STACK_OPTIONS: Record<string, { value: string; label: string }[]> = {
   backend: [
     { value: "core", label: "Core Fundamentals" },
     { value: "nodejs", label: "Node.js / Express" },
-    { value: "django", label: "Python / Django" },
-    { value: "fastapi", label: "Python / FastAPI" },
+    { value: "django", label: "Django" },
+    { value: "fastapi", label: "FastAPI" },
     { value: "mongodb", label: "MongoDB / NoSQL" },
   ],
   "ai-engineering": [
-    { value: "core", label: "Core AI & Prompting" },
-    { value: "python", label: "Python & Data Science" },
-    { value: "langchain", label: "LangChain & RAG" },
-    { value: "pytorch", label: "PyTorch & Fine-Tuning" },
+    { value: "core", label: "Core AI" },
+    { value: "llm", label: "LLM" },
+    { value: "deep-learning", label: "Deep Learning" },
+    { value: "ml", label: "Machine Learning" },
+    { value: "nlp", label: "NLP" },
+    { value: "rag", label: "RAG" },
+
+
   ],
   uiux: [
     { value: "core", label: "Design Fundamentals" },
@@ -72,7 +76,7 @@ function NewInterview() {
   const nav = useNavigate();
   const [role, setRole] = useState("frontend");
   const [mode, setMode] = useState<"text" | "audio" | "video">("text");
-  const [minutes, setMinutes] = useState(10);
+  const [minutes, setMinutes] = useState(20);
   const [experience, setExperience] = useState("mid");
   const [selectedStacks, setSelectedStacks] = useState<string[]>(["core"]);
   const [company, setCompany] = useState("");
@@ -185,10 +189,10 @@ function NewInterview() {
             </select>
           </div>
 
-          {/* Multi-Select Tech Stack Focus (Max 3) */}
+          {/* Multi-Select Technology Focus (Max 3) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">Tech Stack Focus</label>
+              <label className="text-sm font-medium">Technology Focus</label>
               <span className="text-xs text-muted-foreground">Select up to 3 max</span>
             </div>
             <div className="flex flex-wrap gap-2">

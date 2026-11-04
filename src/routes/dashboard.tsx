@@ -1,10 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowRight, MessageSquare, Mic, Video } from "lucide-react";
+import { ArrowRight, MessageSquare, Mic, Video, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/intervue-you/app-shell";
 import { ScoreRing, SkillBar } from "@/components/intervue-you/primitives";
 import { SKILLS } from "@/data/marketing";
-import { profileStore, formatRoleName, type ProfileData, type Session } from "@/services/interview";
+import { profileStore, formatRoleName, interviewService, type ProfileData, type Session } from "@/services/interview";
 import { storage } from "@/lib/storage";
 import { getToken } from "@/lib/auth";
 
@@ -109,6 +109,16 @@ function Dashboard() {
 
     loadDashboardData();
   }, [nav]);
+
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this session?")) return;
+
+    // Optimistically update the UI
+    setData((prev) => (prev ? { ...prev, list: prev.list.filter((s) => (s._id || s.id) !== id) } : prev));
+    await interviewService.delete(id);
+  };
 
   if (!data) {
     return (
@@ -221,11 +231,11 @@ function Dashboard() {
               "—";
 
             return (
-              <li key={sessionId}>
+              <li key={sessionId} className="group relative flex items-center hover:bg-accent transition-colors">
                 <Link
                   to="/results/$id"
                   params={{ id: sessionId }}
-                  className="flex items-center gap-4 px-5 py-4 hover:bg-accent transition-colors"
+                  className="flex flex-1 items-center gap-4 px-5 py-4"
                 >
                   <I className="h-4 w-4 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
@@ -236,6 +246,13 @@ function Dashboard() {
                   </div>
                   <span className="font-semibold tabular-nums">{sessionOverall}</span>
                 </Link>
+                <button
+                  onClick={(e) => handleDelete(e, sessionId)}
+                  className="absolute right-16 rounded p-2 text-muted-foreground opacity-0 hover:bg-muted hover:text-red-500 group-hover:opacity-100 transition-all"
+                  aria-label="Delete session"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </li>
             );
           })}

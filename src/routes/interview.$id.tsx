@@ -129,7 +129,7 @@ function Room() {
   useEffect(() => {
     if (s?.mode !== "video") return;
 
-    const isDesktop = window.matchMedia("(min-width: 640px)").matches;
+    const isDesktop = window.matchMedia("(min-width: 740px)").matches;
     if (!isDesktop) return;
 
     let isCancelled = false;
@@ -281,7 +281,7 @@ function Room() {
     }
   }, [s, q, thinking, askError, scoringError, isSubmitting]);
 
-  // Finish Interview Handler
+// Finish Interview Handler
   const finish = async (cur: Session) => {
     if (finishedRef.current) return;
     finishedRef.current = true;
@@ -294,7 +294,8 @@ function Room() {
     try {
       await interviewService.score(cur);
       if (!isMountedRef.current) return;
-      nav({ to: "/results/$id", params: { id: cur.id } });
+      // Added replace: true to prevent back-button navigation to this screen
+      nav({ to: "/results/$id", params: { id: cur.id }, replace: true });
     } catch (err) {
       console.error("Error scoring session:", err);
       if (isMountedRef.current) {
@@ -373,44 +374,62 @@ function Room() {
         }
       };
 
-      rec.onerror = (err) => {
-        console.error("Speech recognition error:", err);
-        if (isMountedRef.current) setListening(false);
-      };
+      
 
-      rec.onend = () => {
-        if (isMountedRef.current) setListening(false);
-      };
+  rec.onerror = (event: any) => {
+    // 1. Ignore expected cancellation/pause errors to break the log loop
+    if (event.error === "aborted" || event.error === "no-speech") {
+      return;
+    }
 
-      recRef.current = rec;
-      rec.start();
-      setListening(true);
-    } catch (err) {
-      console.error("Failed to start speech recognition:", err);
-      setListening(false);
+    console.error("Speech recognition error:", event);
+
+    // 2. Handle actual permission or hardware issues
+    if (event.error === "not-allowed") {
+      console.warn("Microphone access was denied by the user.");
     }
   };
 
-  if (s === undefined) {
-    return (
-      <div className="grid min-h-dvh place-items-center bg-background text-foreground">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+  rec.onend = () => {
+    // 3. Wrap start() in a try-catch so calling start while stopping doesn't throw
+    if (listening && !finishedRef.current) {
+      try {
+        rec.start();
+      } catch (e) {
+        // Recognition is still shutting down, safely ignore
+      }
+    }
+  };
 
-  if (s === null) {
-    return (
-      <div className="grid min-h-dvh place-items-center p-4 text-center bg-background text-foreground">
-        <div>
-          <p className="text-lg font-medium">This interview wasn't found.</p>
-          <Link to="/interview/new" className="mt-4 inline-block font-medium text-primary hover:underline">
-            Start a new interview
-          </Link>
+        recRef.current = rec;
+        rec.start();
+        setListening(true);
+      } catch (err) {
+        console.error("Failed to start speech recognition:", err);
+        setListening(false);
+      }
+    };
+
+    if (s === undefined) {
+      return (
+        <div className="grid min-h-dvh place-items-center bg-background text-foreground">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
-      </div>
-    );
-  }
+      );
+    }
+
+    if (s === null) {
+      return (
+        <div className="grid min-h-dvh place-items-center p-4 text-center bg-background text-foreground">
+          <div>
+            <p className="text-lg font-medium">This interview wasn't found.</p>
+            <Link to="/interview/new" className="mt-4 inline-block font-medium text-primary hover:underline">
+              Start a new interview
+            </Link>
+          </div>
+        </div>
+      );
+    }
 
   const total = interviewService.questionCount(s.minutes);
   const mainAskedTurns = (s.turns || []).filter((t) => !t.followUp).length;
