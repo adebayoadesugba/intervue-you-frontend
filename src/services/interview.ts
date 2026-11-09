@@ -21,6 +21,45 @@ export function formatRoleName(role?: string): string {
     .join(" ");
 }
 
+export function formatStackName(stack?: string): string {
+  if (!stack) return "Core";
+  const normalized = stack.toLowerCase().trim();
+  const map: Record<string, string> = {
+    react: "React",
+    vue: "Vue",
+    angular: "Angular",
+    nodejs: "Node.js",
+    llm: "LLM",
+    rag: "RAG",
+    "deep-learning": "Deep Learning",
+    golang: "Go",
+    php: "PHP",
+    ruby: "Ruby",
+  };
+  if (map[normalized]) return map[normalized]!;
+  return stack
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+export function formatDifficultyLabel(level?: string): string {
+  if (!level) return "Mid-level";
+  const normalized = level.toLowerCase().trim();
+  const map: Record<string, string> = {
+    junior: "Junior",
+    mid: "Mid-level",
+    senior: "Senior",
+    expert: "Expert",
+  };
+  if (map[normalized]) return map[normalized]!;
+  return level
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+
 export interface Turn {
   q: string;
   a: string;
@@ -145,6 +184,7 @@ export const sessions = new SessionStore();
 
 export interface ProfileData {
   role: string;
+  stack?: string[];
   level?: string;
   company?: string;
 }
@@ -345,4 +385,60 @@ export const interviewService = {
       return false;
     }
   },
+
+
+  // Inside interview.ts -> interviewService object:
+
+async getAllSessions(): Promise<Session[]> {
+  try {
+    const data = await apiFetch<any>("/api/sessions");
+    const rawList: any[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.sessions)
+      ? data.sessions
+      : Array.isArray(data?.data)
+      ? data.data
+      : [];
+
+    return rawList.map((raw: any) => {
+      const sessionId = String(raw._id || raw.id);
+      const evalData: SessionEvaluation | undefined = raw.evaluation;
+      const reportData: ReportData | undefined = raw.report || evalData?.report;
+
+      // Extract date safely into numeric timestamp
+      const rawDate = raw.createdAt || raw.created_at || raw.date;
+      const parsedTime = rawDate ? new Date(rawDate).getTime() : Date.now();
+      const createdAt = isNaN(parsedTime) ? Date.now() : parsedTime;
+
+      return {
+        id: sessionId,
+        _id: sessionId,
+        pendingQuestion: raw.pendingQuestion,
+        role: raw.role || "Software Engineer",
+        mode: raw.mode || "text",
+        minutes: raw.minutes || 10,
+        experienceLevel: raw.experienceLevel || "junior",
+        stack: raw.stack || ["core"],
+        timeframe: raw.timeframe || "",
+        cv: raw.cv || "",
+        createdAt: createdAt,
+        turns: normalizeTurns(raw),
+        company: raw.company || "",
+        overall: reportData?.overall_score ?? evalData?.overallScore ?? raw.overallScore ?? 0,
+        scores: evalData?.scores || raw.scores || {
+          technical: reportData?.competencies?.technical_depth?.score ?? null,
+          communication: reportData?.competencies?.communication?.score ?? null,
+          problemSolving: reportData?.competencies?.problem_solving?.score ?? null,
+          teamwork: reportData?.competencies?.teamwork?.score ?? null,
+        },
+        feedback: typeof raw.feedback === "string" ? JSON.parse(raw.feedback) : (raw.feedback || evalData?.feedback || []),
+        evaluation: evalData,
+        report: reportData,
+      };
+    });
+  } catch (err) {
+    console.error("Failed to fetch sessions from API:", err);
+    return [];
+  }
+},
 };

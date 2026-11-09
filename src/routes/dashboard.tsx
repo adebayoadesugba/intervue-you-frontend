@@ -20,6 +20,22 @@ export const Route = createFileRoute("/dashboard")({
 
 const icons = { text: MessageSquare, audio: Mic, video: Video };
 
+// Helper to safely extract a numeric timestamp from any date format (MongoDB, string, timestamp)
+function getSessionTime(s: any): number {
+  const rawDate = s?.createdAt || s?.created_at || s?.date || s?.timestamp;
+  if (!rawDate) return 0;
+  if (typeof rawDate === "number") return rawDate;
+  if (typeof rawDate === "string") {
+    const t = new Date(rawDate).getTime();
+    return isNaN(t) ? 0 : t;
+  }
+  if (rawDate.$date) {
+    const t = new Date(rawDate.$date).getTime();
+    return isNaN(t) ? 0 : t;
+  }
+  return 0;
+}
+
 function Dashboard() {
   const nav = useNavigate();
   const [data, setData] = useState<{ p: ProfileData | null; list: Session[]; name: string } | null>(null);
@@ -72,17 +88,36 @@ function Dashboard() {
             ? history.data
             : [];
 
-          // Deduplicate and combine API sessions with LocalStorage sessions
+          // Deduplicate and merge API sessions with LocalStorage sessions
           const combinedMap = new Map<string, Session>();
-          [...apiList, ...localSessions].forEach((s) => {
+          
+          // 1. Load LocalStorage items first
+          localSessions.forEach((s) => {
             const sId = String(s._id || s.id);
             if (sId && sId !== "undefined") {
               combinedMap.set(sId, s);
             }
           });
 
+          // 2. Merge API items (updating local items or adding database-only items for Incognito mode)
+          apiList.forEach((s: any) => {
+            const sId = String(s._id || s.id);
+            if (sId && sId !== "undefined") {
+              const existing = combinedMap.get(sId);
+              // Merge object fields so scores and reports are preserved in incognito
+              combinedMap.set(sId, {
+                ...existing,
+                ...s,
+                id: sId,
+                _id: sId,
+                createdAt: getSessionTime(s) || getSessionTime(existing),
+              });
+            }
+          });
+
+          // 3. Sort strictly from NEWEST to OLDEST
           const mergedList = Array.from(combinedMap.values()).sort(
-            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+            (a, b) => getSessionTime(b) - getSessionTime(a)
           );
 
           setData({
@@ -91,17 +126,19 @@ function Dashboard() {
             name: user.name || "there",
           });
         } else {
+          const sortedLocal = localSessions.sort((a, b) => getSessionTime(b) - getSessionTime(a));
           setData({
             p: currentProfile,
-            list: localSessions,
+            list: sortedLocal,
             name: user.name || "there",
           });
         }
       } catch (err) {
         console.error("Failed to load sessions from Express:", err);
+        const sortedLocal = localSessions.sort((a, b) => getSessionTime(b) - getSessionTime(a));
         setData({
           p: currentProfile,
-          list: localSessions,
+          list: sortedLocal,
           name: user.name || "there",
         });
       }
@@ -116,7 +153,7 @@ function Dashboard() {
     if (!confirm("Are you sure you want to delete this session?")) return;
 
     // Optimistically update the UI
-    setData((prev) => (prev ? { ...prev, list: prev.list.filter((s) => (s._id || s.id) !== id) } : prev));
+    setData((prev) => (prev ? { ...prev, list: prev.list.filter((s) => String(s._id || s.id) !== String(id)) } : prev));
     await interviewService.delete(id);
   };
 
@@ -221,7 +258,7 @@ function Dashboard() {
       ) : (
         <ul className="mt-3 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
           {list.map((s: any) => {
-            const sessionId = s._id || s.id;
+            const sessionId = String(s._id || s.id);
             const I = icons[s.mode as keyof typeof icons] || icons.text;
             const sessionOverall =
               s.evaluation?.report?.overall_score ??
@@ -229,6 +266,9 @@ function Dashboard() {
               s.overallScore ??
               s.overall ??
               "—";
+
+            const timestamp = getSessionTime(s);
+            const dateDisplay = timestamp > 0 ? new Date(timestamp).toLocaleDateString() : "Recent";
 
             return (
               <li key={sessionId} className="group relative flex items-center hover:bg-accent transition-colors">
@@ -241,7 +281,7 @@ function Dashboard() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{formatRoleName(s.role)}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(s.createdAt).toLocaleDateString()} · {s.minutes || 10} min
+                      {dateDisplay} · {s.minutes || 10} min
                     </p>
                   </div>
                   <span className="font-semibold tabular-nums">{sessionOverall}</span>

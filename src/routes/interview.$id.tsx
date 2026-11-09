@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate, useBlocker } from "@tanstack/react-
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Mic, MicOff, Send, X, Laptop, AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { interviewService, sessions, type Session } from "@/services/interview";
+import { interviewService, sessions, formatDifficultyLabel, formatStackName, type Session } from "@/services/interview";
 import { speech } from "@/services/speech";
 import { ThemeToggle } from "@/components/intervue-you/primitives";
 import { storage } from "@/lib/storage";
@@ -467,7 +467,7 @@ function Room() {
       {/* Header Bar */}
       <header className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-foreground">{s.role}</p>
+          <p className="truncate text-sm font-medium text-foreground"> {formatDifficultyLabel(s.experienceLevel)} · {s.role} · {formatStackName(s.stack?.[0])}</p>
           <p className="text-xs text-muted-foreground">
             Question {activeQuestionNum} of {total} {q?.followUp ? "(Follow-up)" : ""} · {mm}
           </p>

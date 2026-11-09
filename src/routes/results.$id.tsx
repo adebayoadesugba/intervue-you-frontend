@@ -4,7 +4,7 @@ import { Loader2, Send, CheckCircle2, AlertTriangle, TrendingUp, Award, Quote, C
 import { AppShell } from "@/components/intervue-you/app-shell";
 import { ScoreRing, SkillBar } from "@/components/intervue-you/primitives";
 import { SKILLS } from "@/data/marketing";
-import { interviewService, sessions, formatRoleName, type Session } from "@/services/interview";
+import { interviewService, sessions, formatDifficultyLabel, formatRoleName, formatStackName, type Session } from "@/services/interview";
 import { getToken } from "@/lib/auth";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -47,7 +47,7 @@ function Results() {
       }
 
       const local = sessions.get(id);
-      if (local && local.report) {
+      if (local && local.report && local.turns?.length > 0) {
         setS({ ...local, role: formatRoleName(local.role) });
         return;
       }
@@ -67,13 +67,33 @@ function Results() {
         // Un-nest report if nested under rawReport.report
         const reportData = rawReport?.report || rawReport;
 
+        // Parse feedback array cleanly from JSON string or nested objects
+        let parsedFeedback = [];
+        if (typeof data.feedback === "string") {
+          try { parsedFeedback = JSON.parse(data.feedback); } catch (e) {}
+        } else if (Array.isArray(data.feedback)) {
+          parsedFeedback = data.feedback;
+        } else if (Array.isArray(evalData?.feedback)) {
+          parsedFeedback = evalData.feedback;
+        }
+
+        // Standardize transcript turns
+        const rawTurns = data.transcript || data.turns || [];
+        const formattedTurns = rawTurns.map((t: any) => ({
+          q: t.q || t.question || "",
+          a: t.a || t.userAnswer || "",
+          followUp: Boolean(t.followUp),
+        }));
+
         const formattedSession: Session = {
           id: data._id || data.id,
           role: formatRoleName(data.role || "Software Engineer"),
+          experienceLevel: data.experienceLevel || data.difficulty || local?.experienceLevel || "mid",
+          stack: Array.isArray(data.stack) && data.stack.length > 0 ? data.stack : (local?.stack || ["core"]),
           mode: data.mode || "text",
           minutes: data.minutes || 10,
           createdAt: new Date(data.createdAt || Date.now()).getTime(),
-          turns: data.transcript || data.turns || [],
+          turns: formattedTurns,
           overall: reportData?.overall_score ?? evalData?.overallScore ?? data.overallScore ?? 0,
           scores: evalData?.scores || data.scores || {
             technical: reportData?.competencies?.technical_depth?.score,
@@ -82,7 +102,7 @@ function Results() {
             teamwork: reportData?.competencies?.teamwork?.score,
           },
           speech: data.speech || { wpm: 125, fillers: 2 },
-          feedback: typeof data.feedback === "string" ? JSON.parse(data.feedback) : (data.feedback || evalData?.feedback || []),
+          feedback: parsedFeedback,
           evaluation: evalData,
           report: reportData,
         };
@@ -120,21 +140,78 @@ function Results() {
     );
   }
 
-  const send = async (text: string) => {
+const send = async (text: string) => {
     if (!text.trim() || busy) return;
-    setChat((c) => [...c, { me: true, t: text }]);
+    
+    // 1. Immediately add the user's message AND an empty AI bubble for the stream
+    setChat((c) => [...c, { me: true, t: text }, { me: false, t: "" }]);
     setMsg("");
     setBusy(true);
 
     try {
-      const r = await interviewService.coach(text, s);
-      setChat((c) => [...c, { me: false, t: r }]);
+      const token = getToken();
+      const targetId = s.id || s._id;
+      
+      const res = await fetch(`${API_BASE}/api/interview/session/${targetId}/coach`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ message: text, chatHistory: chat }),
+      });
+
+      if (!res.ok) throw new Error("Network response was not ok");
+      if (!res.body) throw new Error("No readable stream available");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? ""; // Keep incomplete tail in buffer
+
+        for (const ev of events) {
+          const line = ev.split("\n").find((l) => l.startsWith("data: "));
+          if (!line) continue;
+          
+          const dataStr = line.slice(6);
+          if (dataStr === "[DONE]") break;
+
+          try {
+            const data = JSON.parse(dataStr);
+            if (data.content) {
+              // 2. Append streamed characters directly to the last chat bubble
+              setChat((prev) => {
+                const newChat = [...prev];
+                newChat[newChat.length - 1] = {
+                  ...newChat[newChat.length - 1],
+                  t: newChat[newChat.length - 1].t + data.content,
+                };
+                return newChat;
+              });
+            }
+          } catch (e) {
+            // Ignore partial parse errors
+          }
+        }
+      }
     } catch (err) {
       console.error("Coach response error:", err);
-      setChat((c) => [
-        ...c,
-        { me: false, t: "I ran into an issue connecting to the AI coach. Please try asking again!" },
-      ]);
+      // 3. If it fails, overwrite the empty AI bubble with the error message
+      setChat((prev) => {
+        const newChat = [...prev];
+        newChat[newChat.length - 1] = {
+          ...newChat[newChat.length - 1],
+          t: "I ran into an issue connecting to the AI coach. Please try asking again!",
+        };
+        return newChat;
+      });
     } finally {
       setBusy(false);
     }
@@ -166,6 +243,7 @@ function Results() {
     ? report.areas_for_improvement
     : ["Provide deeper implementation details and trade-off comparisons in future answers."];
 
+  // Question-by-question feedback list construction
   const feedbackList = (s.feedback && s.feedback.length > 0)
     ? s.feedback
     : s.turns.map((t) => ({
@@ -184,7 +262,7 @@ function Results() {
         <ScoreRing value={overallScore} size={120} label="Overall Score" />
         <div>
           <p className="text-sm text-muted-foreground">
-            {formatRoleName(s.role)} · {s.mode.charAt(0).toUpperCase() + s.mode.slice(1)} · {s.turns.length} answers
+           {formatDifficultyLabel(s.experienceLevel)} · {formatRoleName(s.role)} · {formatStackName(s.stack?.[0])} · {s.mode.charAt(0).toUpperCase() + s.mode.slice(1)} · {s.turns.length} answers
           </p>
           <h1 className="mt-1 text-3xl font-semibold">
             You're{" "}
@@ -299,11 +377,10 @@ function Results() {
       {/* Question-by-Question Detailed Feedback */}
       <h2 className="mt-10 text-lg font-semibold">Question by question</h2>
       <div className="mt-3 space-y-3">
-        {feedbackList.map((f, i) => (
+        {feedbackList.map((f: any, i: number) => (
           <details key={i} className="surface-card group rounded-2xl p-5" open={i === 0}>
             <summary className="flex cursor-pointer list-none items-start justify-between gap-4">
               <span className="font-medium text-sm text-foreground">{f.q}</span>
-              
             </summary>
             <div className="mt-4 space-y-4 text-sm">
               <p className="rounded-xl bg-muted/60 p-3 text-muted-foreground leading-relaxed">“{f.a}”</p>
@@ -329,13 +406,13 @@ function Results() {
                 <span className="self-center text-xs text-muted-foreground ml-1">STAR check</span>
               </div>
 
-              {/* A Stronger Answer Section */}
+              {/* // A Stronger Answer Section
               {f.better && (
                 <div className="pt-2">
                   <p className="text-xs font-semibold uppercase tracking-wider text-primary">A stronger answer</p>
                   <p className="mt-1 text-sm text-muted-foreground leading-relaxed">{f.better}</p>
                 </div>
-              )}
+              )} */}
             </div>
           </details>
         ))}
@@ -359,10 +436,10 @@ function Results() {
               ))}
             </div>
           )}
-          {chat.map((m, i) => (
+        {chat.map((m, i) => (
             <div
               key={i}
-              className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${
+              className={`max-w-[85%] whitespace-pre-wrap leading-relaxed rounded-2xl px-4 py-2.5 text-sm ${
                 m.me ? "ml-auto bg-primary text-primary-foreground" : "bg-muted"
               }`}
             >
