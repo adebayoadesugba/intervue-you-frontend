@@ -1,12 +1,17 @@
 /** Safe localStorage wrapper — never throws (private mode, SSR, quota). */
-const PREFIX = "rehearse:";
+const PREFIX = "Intervue You:";
 
 export const storage = {
   get<T>(key: string, fallback: T): T {
     if (typeof window === "undefined") return fallback;
     try {
       const item = localStorage.getItem(key);
-      return item ? JSON.parse(item) : fallback;
+      if (item === null) return fallback;
+      try {
+        return JSON.parse(item) as T;
+      } catch {
+        return item as unknown as T;
+      }
     } catch {
       return fallback;
     }
@@ -15,7 +20,8 @@ export const storage = {
   set<T>(key: string, value: T): void {
     if (typeof window === "undefined") return;
     try {
-      localStorage.setItem(key, JSON.stringify(value));
+      const serialized = typeof value === "string" ? value : JSON.stringify(value);
+      localStorage.setItem(key, serialized);
     } catch (err) {
       console.error("Storage set error:", err);
     }
